@@ -1,4 +1,5 @@
 use anyhow::Result;
+use cargo_toml::Manifest;
 use std::path::PathBuf;
 
 use crate::{
@@ -72,10 +73,22 @@ impl Install {
 
         // 2. Verify this is a binary crate (download source — fast if already cached)
         let src_dir = Compiler::download_source(&self.name, &entry.vers, Some(&entry.cksum))?;
-        if !src_dir.join("src").join("main.rs").exists() {
+        let manifest_path = src_dir.join("Cargo.toml");
+        let manifest = Manifest::from_path(&manifest_path)?;
+
+        let has_bin = !manifest.bin.is_empty()
+            || manifest
+                .package
+                .as_ref()
+                .map(|p| p.default_run.is_some())
+                .unwrap_or(false)
+            || src_dir.join("src/bin").exists();
+
+        if !has_bin {
             anyhow::bail!(
                 "'{}' is a library crate — use `ignite add {}` to add it as a dependency",
-                self.name, self.name
+                self.name,
+                self.name
             );
         }
 
@@ -123,7 +136,11 @@ impl Install {
         println!("\t  {G}cache        :{R} {Y}miss → compiling{R}");
 
         let features_for_compile = if self.features.is_empty() {
-            entry.features.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>()
+            entry
+                .features
+                .iter()
+                .map(|(k, _)| k.clone())
+                .collect::<Vec<_>>()
         } else {
             self.features.clone()
         };
@@ -157,10 +174,8 @@ fn cargo_bin_dir() -> Result<PathBuf> {
         return Ok(PathBuf::from(p).join("bin"));
     }
     #[cfg(windows)]
-    let home = std::env::var("USERPROFILE")
-        .map_err(|_| anyhow::anyhow!("USERPROFILE not set"))?;
+    let home = std::env::var("USERPROFILE").map_err(|_| anyhow::anyhow!("USERPROFILE not set"))?;
     #[cfg(not(windows))]
-    let home = std::env::var("HOME")
-        .map_err(|_| anyhow::anyhow!("HOME not set"))?;
+    let home = std::env::var("HOME").map_err(|_| anyhow::anyhow!("HOME not set"))?;
     Ok(PathBuf::from(home).join(".cargo").join("bin"))
 }
