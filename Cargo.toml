@@ -29,9 +29,9 @@ ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] 
 anyhow = "1.0.102"
 memchr = "2.8.0"
 blake3 = { version = "1", default-features = false }
-sha2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.11.0", default-features = false }
 rayon = "1"
-toml_edit = "0.22"
+toml_edit = "0.25.11+spec-1.1.0"
 flate2 = "1"
 tar = "0.4"
 
