@@ -1,9 +1,9 @@
 [package]
 name = "cargo-ignite"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 description = "A high-performance alternative to `cargo add` for adding, removing, fetching, and installing dependencies, delivering up to **45× faster** performance than Cargo’s default tooling."
-license-file = "LICENSE"
+license-file = "LICENSE-APACHE"
 keywords = ["cargo", "crates", "features", "cli"]
 repository = "https://github.com/vunholy/cargo-ignite"
 categories = ["command-line-utilities", "development-tools::cargo-plugins"]

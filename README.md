@@ -268,6 +268,6 @@ Produces two binaries, `cargo-ignite` and `ignite`, both pointing to the same bi
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](LICENSE) — free for personal, educational, and noncommercial open-source use.
+Licensed under the [Apache License, Version 2.0](LICENSE-APACHE).
 
 Required Notice: Copyright vunholy (https://github.com/vunholy)
