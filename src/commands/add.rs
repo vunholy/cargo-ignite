@@ -61,7 +61,7 @@ impl Add {
         use a::*;
 
         if self.crates.is_empty() {
-            anyhow::bail!("no crates specified — usage: hatch add <crate> [crate2 ...]");
+            anyhow::bail!("no crates specified — usage: ignite add <crate> [crate2 ...]");
         }
 
         let names_display = self.crates.iter()
@@ -78,7 +78,7 @@ impl Add {
             let entry = api
                 .get(name, version.as_deref())
                 .ok_or_else(|| anyhow::anyhow!(
-                    "version not found for '{}' — try: hatch fetch {}", name, name
+                    "version not found for '{}' — try: ignite fetch {}", name, name
                 ))?;
             resolved.push((name.clone(), entry));
         }

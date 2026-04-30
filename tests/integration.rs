@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 fn fixture_project(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("hatch-integ-{name}"));
+    let dir = std::env::temp_dir().join(format!("ignite-integ-{name}"));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
@@ -15,7 +15,7 @@ fn fixture_project(name: &str) -> PathBuf {
     dir
 }
 
-/// hatch add serde — should update Cargo.toml and not error
+/// ignite add serde — should update Cargo.toml and not error
 #[test]
 #[ignore = "requires network"]
 fn test_add_updates_cargo_toml() {
@@ -23,10 +23,10 @@ fn test_add_updates_cargo_toml() {
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(&dir).unwrap();
 
-    let api = cargo_hatch::crates::CratesAPI::new();
+    let api = cargo_ignite::crates::CratesAPI::new();
     let entry = api.get("serde", None).expect("should resolve serde");
 
-    let mut manifest = cargo_hatch::manifest::Manifest::load(&dir).unwrap();
+    let mut manifest = cargo_ignite::manifest::Manifest::load(&dir).unwrap();
     manifest.upsert_dependency("serde", &entry.vers, &[]);
     manifest.save().unwrap();
 
@@ -38,14 +38,14 @@ fn test_add_updates_cargo_toml() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// hatch add serde --precompile twice: second call should be a cache hit
+/// ignite add serde --precompile twice: second call should be a cache hit
 #[test]
 #[ignore = "requires network and rustc"]
 fn test_precompile_cache_hit_on_second_call() {
-    use cargo_hatch::cache::{Cache, CacheKey, FeatureSet};
-    use cargo_hatch::compiler::Compiler;
+    use cargo_ignite::cache::{Cache, CacheKey, FeatureSet};
+    use cargo_ignite::compiler::Compiler;
 
-    let api = cargo_hatch::crates::CratesAPI::new();
+    let api = cargo_ignite::crates::CratesAPI::new();
     let entry = api.get("memchr", Some("2.7.4")).expect("should resolve memchr 2.7.4");
 
     let rustc_ver = Compiler::rustc_version().unwrap();
@@ -76,10 +76,10 @@ fn test_precompile_cache_hit_on_second_call() {
 #[ignore = "requires network"]
 fn test_add_with_build_rs_updates_manifest() {
     let dir = fixture_project("add-build-rs");
-    let api = cargo_hatch::crates::CratesAPI::new();
+    let api = cargo_ignite::crates::CratesAPI::new();
     let entry = api.get("cc", None).expect("should resolve cc");
 
-    let mut manifest = cargo_hatch::manifest::Manifest::load(&dir).unwrap();
+    let mut manifest = cargo_ignite::manifest::Manifest::load(&dir).unwrap();
     manifest.upsert_dependency("cc", &entry.vers, &[]);
     manifest.save().unwrap();
 

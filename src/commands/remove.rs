@@ -35,7 +35,7 @@ impl Remove {
         use a::*;
 
         if self.crates.is_empty() {
-            anyhow::bail!("no crates specified — usage: hatch remove <crate> [crate2 ...]");
+            anyhow::bail!("no crates specified — usage: ignite remove <crate> [crate2 ...]");
         }
 
         let names_display = self.crates.iter()

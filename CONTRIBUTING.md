@@ -4,13 +4,13 @@ Thanks for taking the time. A few things to know before you send a PR.
 
 ## What this project is
 
-cargo-hatch is a focused tool — fast dependency management for Rust. Before adding a feature, open an issue first so we can agree on whether it fits the scope. Bug fixes and performance improvements are always welcome without prior discussion.
+cargo-ignite is a focused tool — fast dependency management for Rust. Before adding a feature, open an issue first so we can agree on whether it fits the scope. Bug fixes and performance improvements are always welcome without prior discussion.
 
 ## Setup
 
 ```sh
-git clone https://github.com/vunholy/cargo-hatch
-cd cargo-hatch
+git clone https://github.com/vunholy/cargo-ignite
+cd cargo-ignite
 cargo build
 cargo test
 ```

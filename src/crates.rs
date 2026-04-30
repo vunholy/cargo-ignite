@@ -157,7 +157,7 @@ impl CratesAPI {
         ureq::get(&format!("https://index.crates.io/{name}"))
             .header(
                 "User-Agent",
-                concat!("cargo-hatch/", env!("CARGO_PKG_VERSION")),
+                concat!("cargo-ignite/", env!("CARGO_PKG_VERSION")),
             )
             .call()
             .ok()?
@@ -199,7 +199,7 @@ impl CratesAPI {
         let bytes = ureq::get(&format!("https://crates.io/api/v1/crates/{crate_name}"))
             .header(
                 "User-Agent",
-                concat!("cargo-hatch/", env!("CARGO_PKG_VERSION")),
+                concat!("cargo-ignite/", env!("CARGO_PKG_VERSION")),
             )
             .header("Accept", "application/json")
             .call()

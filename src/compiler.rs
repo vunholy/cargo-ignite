@@ -102,7 +102,7 @@ impl Compiler {
 
 impl Compiler {
     pub fn download_source(name: &str, version: &str, cksum: Option<&str>) -> Result<PathBuf> {
-        let src_dir = Self::hatch_src_dir()?.join(format!("{name}-{version}"));
+        let src_dir = Self::ignite_src_dir()?.join(format!("{name}-{version}"));
         if src_dir.exists() {
             return Ok(src_dir);
         }
@@ -111,7 +111,7 @@ impl Compiler {
         let bytes = ureq::get(&url)
             .header(
                 "User-Agent",
-                concat!("cargo-hatch/", env!("CARGO_PKG_VERSION")),
+                concat!("cargo-ignite/", env!("CARGO_PKG_VERSION")),
             )
             .call()
             .context("failed to download crate tarball")?
@@ -124,7 +124,7 @@ impl Compiler {
                 .with_context(|| format!("checksum mismatch for {name}-{version}"))?;
         }
 
-        let parent = Self::hatch_src_dir()?;
+        let parent = Self::ignite_src_dir()?;
         std::fs::create_dir_all(&parent)?;
         let gz = flate2::read::GzDecoder::new(&bytes[..]);
         let mut archive = tar::Archive::new(gz);
@@ -164,7 +164,7 @@ impl Compiler {
             .to_string()
     }
 
-    fn hatch_src_dir() -> Result<PathBuf> {
+    fn ignite_src_dir() -> Result<PathBuf> {
         #[cfg(windows)]
         let home = std::env::var("USERPROFILE").context("USERPROFILE not set")?;
         #[cfg(not(windows))]
@@ -498,7 +498,7 @@ impl Compiler {
         Ok(compiled)
     }
 
-    /// Full library pre-compilation pipeline for `hatch add --precompile`.
+    /// Full library pre-compilation pipeline for `ignite add --precompile`.
     /// Downloads dep tree, compiles all nodes, stores artifacts in cache.
     pub fn precompile_lib(
         &self,
@@ -513,7 +513,7 @@ impl Compiler {
         let nodes = Self::build_dep_tree(&api, name, version, features)?;
         let levels = Self::topo_sort(&nodes);
 
-        let tmp_out = std::env::temp_dir().join(format!("hatch-lib-{fp}"));
+        let tmp_out = std::env::temp_dir().join(format!("ignite-lib-{fp}"));
         std::fs::create_dir_all(&tmp_out)?;
 
         let compiled = self.compile_all(&levels, &nodes, &tmp_out, 0)?;
@@ -545,7 +545,7 @@ impl Compiler {
         Ok(())
     }
 
-    /// Full binary compilation + install pipeline for `hatch install`.
+    /// Full binary compilation + install pipeline for `ignite install`.
     /// Downloads dep tree, compiles deps + binary, stores in cache.
     /// Returns path of the compiled binary.
     #[allow(clippy::too_many_arguments)]
@@ -597,7 +597,7 @@ impl Compiler {
                 let nodes = Self::build_dep_tree(&api, name, version, features)?;
                 let levels = Self::topo_sort(&nodes);
 
-                let tmp_out = std::env::temp_dir().join(format!("hatch-bin-{fp}"));
+                let tmp_out = std::env::temp_dir().join(format!("ignite-bin-{fp}"));
                 std::fs::create_dir_all(&tmp_out)?;
 
                 let dep_levels: Vec<Vec<String>> = levels
@@ -674,7 +674,7 @@ mod tests {
 
     #[test]
     fn test_dep_node_has_build_script_detection() {
-        let dir = std::env::temp_dir().join("hatch-test-build-rs");
+        let dir = std::env::temp_dir().join("ignite-test-build-rs");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 

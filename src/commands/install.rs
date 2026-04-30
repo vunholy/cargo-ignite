@@ -63,7 +63,7 @@ impl Install {
             .get(&self.name, self.version.as_deref())
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "version not found for '{}' — try: hatch fetch {}",
+                    "version not found for '{}' — try: ignite fetch {}",
                     self.name,
                     self.name
                 )
@@ -74,7 +74,7 @@ impl Install {
         let src_dir = Compiler::download_source(&self.name, &entry.vers, Some(&entry.cksum))?;
         if !src_dir.join("src").join("main.rs").exists() {
             anyhow::bail!(
-                "'{}' is a library crate — use `hatch add {}` to add it as a dependency",
+                "'{}' is a library crate — use `ignite add {}` to add it as a dependency",
                 self.name, self.name
             );
         }

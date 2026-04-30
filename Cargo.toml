@@ -1,23 +1,24 @@
 [package]
-name = "cargo-hatch"
+name = "cargo-ignite"
 version = "0.1.0"
 edition = "2024"
+description = "A fast Cargo plugin for adding and installing crate dependencies"
 license-file = "LICENSE"
 keywords = ["cargo", "crates", "features", "cli"]
-repository = "https://github.com/vunholy/cargo-hatch"
+repository = "https://github.com/vunholy/cargo-ignite"
 categories = ["command-line-utilities", "development-tools::cargo-plugins"]
 exclude = [".cargo/config.toml"]
 
 [lib]
-name = "cargo_hatch"
+name = "cargo_ignite"
 path = "src/lib.rs"
 
 [[bin]]
-name = "cargo-hatch"
+name = "cargo-ignite"
 path = "src/main.rs"
 
 [[bin]]
-name = "hatch"
+name = "ignite"
 path = "src/main.rs"
 
 [dependencies]

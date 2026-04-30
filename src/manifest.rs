@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_insert_simple_dep() {
-        let dir = std::env::temp_dir().join("hatch-test-manifest-insert");
+        let dir = std::env::temp_dir().join("ignite-test-manifest-insert");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("Cargo.toml"), "[package]\nname = \"foo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n").unwrap();
@@ -82,7 +82,7 @@ mod tests {
 
     #[test]
     fn test_insert_dep_with_features() {
-        let dir = std::env::temp_dir().join("hatch-test-manifest-features");
+        let dir = std::env::temp_dir().join("ignite-test-manifest-features");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("Cargo.toml"), "[package]\nname = \"foo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n").unwrap();
@@ -98,7 +98,7 @@ mod tests {
 
     #[test]
     fn test_upsert_updates_version() {
-        let dir = std::env::temp_dir().join("hatch-test-manifest-upsert");
+        let dir = std::env::temp_dir().join("ignite-test-manifest-upsert");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("Cargo.toml"), "[package]\nname = \"foo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nserde = \"1.0.100\"\n").unwrap();
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn test_load_missing_cargo_toml() {
-        let dir = std::env::temp_dir().join("hatch-test-manifest-missing");
+        let dir = std::env::temp_dir().join("ignite-test-manifest-missing");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let result = Manifest::load(&dir);

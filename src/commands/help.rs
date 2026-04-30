@@ -23,11 +23,11 @@ impl Command for Help {
 
         let mut buf = Vec::with_capacity(2048);
 
-        writeln!(buf, "\t{BC}hatch{R}  {G}— fast dependency management for Rust{R}").unwrap();
+        writeln!(buf, "\t{BC}ignite{R}  {G}— fast dependency management for Rust{R}").unwrap();
         writeln!(buf).unwrap();
 
         writeln!(buf, "\t{BG}usage{R}").unwrap();
-        writeln!(buf, "\t  {Y}hatch{R} {G}<command>{R} {G}[args]{R}").unwrap();
+        writeln!(buf, "\t  {Y}ignite{R} {G}<command>{R} {G}[args]{R}").unwrap();
         writeln!(buf).unwrap();
 
         writeln!(buf, "\t{BG}commands{R}").unwrap();

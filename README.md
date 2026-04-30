@@ -1,12 +1,12 @@
-# cargo-hatch
+# cargo-ignite
 
 Fast dependency management for Rust. Reads the crates.io sparse index directly instead of going through cargo, so version resolution is near-instant.
 
 ```
-hatch add serde tokio@1.44 serde_json
-hatch install ripgrep
-hatch remove serde_json
-hatch fetch tokio --metadata
+ignite add serde tokio@1.44 serde_json
+ignite install ripgrep
+ignite remove serde_json
+ignite fetch tokio --metadata
 ```
 
 ---
@@ -23,7 +23,7 @@ When you run `cargo add serde`, cargo:
 
 Steps 1-4 are the same regardless of whether you're adding one crate or ten. They exist because cargo is a general build system, not a manifest editor.
 
-`hatch add` instead:
+`ignite add` instead:
 
 1. Reads the crates.io sparse index file directly from disk (the same file cargo caches at `~/.cargo/registry/index/`)
 2. Parses the last stable, non-yanked version using SIMD-accelerated line scanning
@@ -32,15 +32,15 @@ Steps 1-4 are the same regardless of whether you're adding one crate or ten. The
 
 Steps 1-3 take about 12 ms. The source download (step 4) is skipped on cache hit.
 
-### What hatch does not do
+### What ignite does not do
 
-hatch does **not** run cargo's full semver resolver. It picks the latest stable version of each crate and resolves transitive dependencies to their own latest stable. This means:
+ignite does **not** run cargo's full semver resolver. It picks the latest stable version of each crate and resolves transitive dependencies to their own latest stable. This means:
 
 - Version constraints declared by a crate's dependencies are read but not enforced across the full graph
-- If two crates need conflicting versions of a shared dependency, hatch will not detect this — cargo will catch it on the next `cargo build`
+- If two crates need conflicting versions of a shared dependency, ignite will not detect this — cargo will catch it on the next `cargo build`
 - Features are not validated across the dependency graph
 
-This is intentional. hatch's job is to get the right line into `Cargo.toml` fast. Cargo owns the full resolution step.
+This is intentional. ignite's job is to get the right line into `Cargo.toml` fast. Cargo owns the full resolution step.
 
 ---
 
@@ -50,11 +50,11 @@ Measured with [hyperfine](https://github.com/sharkdp/hyperfine). All runs use a 
 
 Bench project: minimal `cargo new --bin` with no existing dependencies. Each run resets `Cargo.toml` to its initial state via hyperfine's `--prepare`.
 
-### `hatch add` vs `cargo add` — Windows 11
+### `ignite add` vs `cargo add` — Windows 11
 
 System: AMD Ryzen 5 5500, WD Green SATA SSD, Windows 11 Pro, rustc 1.95.0
 
-| Crate | `cargo add` (mean) | `hatch add` (mean) | Speedup |
+| Crate | `cargo add` (mean) | `ignite add` (mean) | Speedup |
 |---|---|---|---|
 | serde | 486 ms | 14.6 ms | **33×** |
 | tokio | 514 ms | 16.0 ms | **32×** |
@@ -64,22 +64,22 @@ System: AMD Ryzen 5 5500, WD Green SATA SSD, Windows 11 Pro, rustc 1.95.0
 | diesel | 528 ms | 11.6 ms | **45×** |
 | actix-web | 581 ms | 20.5 ms | **28×** |
 
-### `hatch fetch` vs `cargo info` — Windows 11
+### `ignite fetch` vs `cargo info` — Windows 11
 
 | Command | Mean | Speedup |
 |---|---|---|
 | `cargo info serde` | 149 ms | — |
-| `hatch fetch serde` | 13.0 ms | **11×** |
+| `ignite fetch serde` | 13.0 ms | **11×** |
 
-`cargo info` initializes cargo's full subsystem even for a read-only query. `hatch fetch` reads one file from disk and parses one JSON line.
+`cargo info` initializes cargo's full subsystem even for a read-only query. `ignite fetch` reads one file from disk and parses one JSON line.
 
 ---
 
-### `hatch add` vs `cargo add` — Linux (WSL2, Fedora 42, kernel 6.6)
+### `ignite add` vs `cargo add` — Linux (WSL2, Fedora 42, kernel 6.6)
 
-Same methodology. hatch binary compiled natively on Linux (GCC 15.2, x86_64).
+Same methodology. ignite binary compiled natively on Linux (GCC 15.2, x86_64).
 
-| Crate | `cargo add` (mean) | `hatch add` (mean) | Speedup |
+| Crate | `cargo add` (mean) | `ignite add` (mean) | Speedup |
 |---|---|---|---|
 | serde | 418 ms | 16.0 ms | **26×** |
 | tokio | 440 ms | 16.1 ms | **27×** |
@@ -89,14 +89,14 @@ Same methodology. hatch binary compiled natively on Linux (GCC 15.2, x86_64).
 | diesel | 400 ms | 15.1 ms | **27×** |
 | actix-web | 520 ms | 15.2 ms | **34×** |
 
-### `hatch fetch` vs `cargo info` — Linux
+### `ignite fetch` vs `cargo info` — Linux
 
 | Command | Mean | Speedup |
 |---|---|---|
 | `cargo info serde` | 80 ms | — |
-| `hatch fetch serde` | 12.5 ms | **6×** |
+| `ignite fetch serde` | 12.5 ms | **6×** |
 
-`cargo info` is faster on Linux than Windows (no PE loader overhead), but hatch still wins by reading the local index cache directly with no cargo startup cost.
+`cargo info` is faster on Linux than Windows (no PE loader overhead), but ignite still wins by reading the local index cache directly with no cargo startup cost.
 
 ---
 
@@ -143,11 +143,11 @@ apk add curl gcc musl-dev git
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source ~/.cargo/env
 
-# 6. Build and install hatch
-git clone https://github.com/vunholy/cargo-hatch
-cd cargo-hatch
+# 6. Build and install ignite
+git clone https://github.com/vunholy/cargo-ignite
+cd cargo-ignite
 cargo build --release
-cp target/release/hatch ~/.cargo/bin/
+cp target/release/ignite ~/.cargo/bin/
 
 # 7. Install hyperfine
 cargo install hyperfine
@@ -158,56 +158,56 @@ cargo new --bin bench && cd bench && cp Cargo.toml Cargo.toml.orig
 hyperfine --warmup 3 --runs 12 \
   --prepare "cp Cargo.toml.orig Cargo.toml" \
   "cargo add serde -q" \
-  "hatch add serde"
+  "ignite add serde"
 ```
 
 ---
 
 ## Commands
 
-### `hatch add <crate[@version]> [crate2 ...] [--features f1,f2] [--precompile]`
+### `ignite add <crate[@version]> [crate2 ...] [--features f1,f2] [--precompile]`
 
 Adds crates to `Cargo.toml`. Resolves to latest stable unless pinned with `@`.
 
 ```sh
-hatch add serde
-hatch add tokio@1.44.0 --features full
-hatch add serde serde_json tokio
-hatch add serde --precompile
+ignite add serde
+ignite add tokio@1.44.0 --features full
+ignite add serde serde_json tokio
+ignite add serde --precompile
 ```
 
 `--precompile` compiles the full dependency tree with `rustc` and stores `.rlib` artifacts in `~/.cargo-construct/cache/`. The next `cargo build` in a project that shares crate + version + rustc + target can link against these cached artifacts directly.
 
-Crates with a `build.rs` are skipped during precompile (they require cargo's build script runner). hatch prints a warning and continues.
+Crates with a `build.rs` are skipped during precompile (they require cargo's build script runner). ignite prints a warning and continues.
 
-### `hatch install <crate> [version] [--features f1,f2]`
+### `ignite install <crate> [version] [--features f1,f2]`
 
 Compiles and installs a binary crate to `~/.cargo/bin/`. Rejects library crates (no `src/main.rs`) with a clear error message. On a cache hit, the binary is copied in without recompiling.
 
 ```sh
-hatch install ripgrep
-hatch install bat 0.24.0
+ignite install ripgrep
+ignite install bat 0.24.0
 ```
 
-### `hatch remove <crate> [crate2 ...]`
+### `ignite remove <crate> [crate2 ...]`
 
 Removes crates from `[dependencies]`. Partially succeeds: removes what it finds, prints "not found" for anything missing, and only errors if nothing matched at all.
 
 ```sh
-hatch remove serde
-hatch remove serde serde_json tokio
+ignite remove serde
+ignite remove serde serde_json tokio
 ```
 
-### `hatch fetch <crate> [version] [--metadata]`
+### `ignite fetch <crate> [version] [--metadata]`
 
 Reads crate info from the local index without touching `Cargo.toml`.
 
 ```sh
-hatch fetch tokio
-hatch fetch serde 1.0.219 --metadata
+ignite fetch tokio
+ignite fetch serde 1.0.219 --metadata
 ```
 
-### `hatch help`
+### `ignite help`
 
 Prints command reference.
 
@@ -217,21 +217,21 @@ Prints command reference.
 
 ### Index cache (read-only reuse of cargo's cache)
 
-hatch reads crate metadata from `~/.cargo/registry/index/index.crates.io-*/cache/`. This is the same directory cargo writes when it fetches index data. hatch does not maintain a separate index copy.
+ignite reads crate metadata from `~/.cargo/registry/index/index.crates.io-*/cache/`. This is the same directory cargo writes when it fetches index data. ignite does not maintain a separate index copy.
 
-Each file in that directory is a newline-delimited stream of JSON objects, one per published version. hatch scans these lines with [memchr](https://github.com/BurntSushi/memchr)'s `memmem::Finder` for SIMD-accelerated substring search, then parses the matched line with [simd-json](https://github.com/simd-lite/simd-json).
+Each file in that directory is a newline-delimited stream of JSON objects, one per published version. ignite scans these lines with [memchr](https://github.com/BurntSushi/memchr)'s `memmem::Finder` for SIMD-accelerated substring search, then parses the matched line with [simd-json](https://github.com/simd-lite/simd-json).
 
-For "latest version" queries (no `@` pin), hatch checks whether the cached file is older than 24 hours and fetches a fresh copy if so. For pinned-version queries, it never refreshes — a specific version's content on crates.io is immutable.
+For "latest version" queries (no `@` pin), ignite checks whether the cached file is older than 24 hours and fetches a fresh copy if so. For pinned-version queries, it never refreshes — a specific version's content on crates.io is immutable.
 
 ### Source cache (`~/.cargo-construct/src/`)
 
-When `hatch add` or `hatch install` downloads a source tarball, it extracts it to `~/.cargo-construct/src/<name>-<version>/` and also writes the raw `.crate` bytes into cargo's own registry cache (`~/.cargo/registry/cache/.../`) so that a subsequent `cargo build` finds it there without re-downloading.
+When `ignite add` or `ignite install` downloads a source tarball, it extracts it to `~/.cargo-construct/src/<name>-<version>/` and also writes the raw `.crate` bytes into cargo's own registry cache (`~/.cargo/registry/cache/.../`) so that a subsequent `cargo build` finds it there without re-downloading.
 
 The write to cargo's registry happens only after a successful extraction, to avoid leaving a corrupt `.crate` file in cargo's cache on a failed download.
 
 ### Artifact cache (`~/.cargo-construct/cache/<fingerprint>/`)
 
-Used by `hatch add --precompile` and `hatch install`. The cache key is a BLAKE3 hash of:
+Used by `ignite add --precompile` and `ignite install`. The cache key is a BLAKE3 hash of:
 
 ```
 rustc_version\x00crate_name\x00crate_version\x00target_triple\x00features
@@ -243,7 +243,7 @@ Null bytes separate fields to prevent length-extension collisions where two diff
 
 Two index files track the artifact store:
 
-- `hatch-index.json` — flat `{fingerprint: entry_path}` map for O(1) lookup
+- `ignite-index.json` — flat `{fingerprint: entry_path}` map for O(1) lookup
 - `lru.json` — `{fingerprint: unix_timestamp}` for LRU eviction
 
 Both are written atomically (write to a `.tmp` file, then rename into place) so a process crash mid-write does not corrupt them.
@@ -255,12 +255,12 @@ Default eviction limit: 10 GB of artifact data. Metadata files do not count towa
 ## Installation
 
 ```sh
-git clone https://github.com/vunholy/cargo-hatch
-cd cargo-hatch
+git clone https://github.com/vunholy/cargo-ignite
+cd cargo-ignite
 cargo install --path .
 ```
 
-Produces two binaries, `cargo-hatch` and `hatch`, both pointing to the same binary. Either works.
+Produces two binaries, `cargo-ignite` and `ignite`, both pointing to the same binary. Either works.
 
 ---
 

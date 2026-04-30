@@ -91,7 +91,7 @@ impl Cache {
         }
     }
 
-    /// Copy all files from `artifacts_src` into the cache and record in hatch-index.json.
+    /// Copy all files from `artifacts_src` into the cache and record in ignite-index.json.
     pub fn store(&self, fp: &str, artifacts_src: &std::path::Path, meta: &CacheMeta) -> Result<()> {
         let entry_dir = self.root.join("cache").join(fp);
         let artifacts_dst = entry_dir.join("artifacts");
@@ -161,7 +161,7 @@ impl Cache {
     }
 
     fn read_index(&self) -> Result<HashMap<String, String>> {
-        let path = self.root.join("hatch-index.json");
+        let path = self.root.join("ignite-index.json");
         if !path.exists() {
             return Ok(HashMap::new());
         }
@@ -170,10 +170,10 @@ impl Cache {
             return Ok(HashMap::new());
         }
         let value = simd_json::to_borrowed_value(&mut bytes)
-            .context("failed to parse hatch-index.json")?;
+            .context("failed to parse ignite-index.json")?;
         let obj = value
             .as_object()
-            .ok_or_else(|| anyhow::anyhow!("hatch-index.json is not a JSON object"))?;
+            .ok_or_else(|| anyhow::anyhow!("ignite-index.json is not a JSON object"))?;
         Ok(obj
             .iter()
             .filter_map(|(k, v)| v.as_str().map(|s| (k.to_string(), s.to_string())))
@@ -191,7 +191,7 @@ impl Cache {
             first = false;
         }
         buf.push('}');
-        let path = self.root.join("hatch-index.json");
+        let path = self.root.join("ignite-index.json");
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, &buf)?;
         std::fs::rename(&tmp, &path)?;
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn test_cache_store_and_lookup() {
         use std::fs;
-        let tmp_root = std::env::temp_dir().join("hatch-test-cache-store");
+        let tmp_root = std::env::temp_dir().join("ignite-test-cache-store");
         let _ = fs::remove_dir_all(&tmp_root);
         fs::create_dir_all(&tmp_root).unwrap();
 
@@ -368,7 +368,7 @@ mod tests {
     #[test]
     fn test_lru_eviction() {
         use std::fs;
-        let tmp_root = std::env::temp_dir().join("hatch-test-cache-lru");
+        let tmp_root = std::env::temp_dir().join("ignite-test-cache-lru");
         let _ = fs::remove_dir_all(&tmp_root);
         fs::create_dir_all(&tmp_root).unwrap();
 
