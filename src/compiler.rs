@@ -490,7 +490,7 @@ impl Compiler {
 
                     if node.has_build_script {
                         eprintln!(
-                            "warning: {} has a build script — skipping precompile for this crate",
+                            " warning: {} has a build script — skipping precompile for this crate",
                             name
                         );
                         return Err(anyhow::anyhow!("build script: {name}"));
