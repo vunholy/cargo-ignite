@@ -1,8 +1,8 @@
 # cargo-ignite
 
-Fast dependency management for Rust. Reads the crates.io sparse index directly instead of going through cargo, so version resolution is near-instant.
-
 [![crates.io](https://img.shields.io/crates/v/cargo-ignite.svg)](https://crates.io/crates/cargo-ignite)
+
+Fast dependency management for Rust. Reads the crates.io sparse index directly instead of going through cargo, so version resolution is near-instant.
 
 ```bash
 $ ignite add serde tokio@1.44 serde_json
