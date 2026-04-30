@@ -1,6 +1,15 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
+// TODO: Support build-scripts
+// TODO: Support build-scripts
+// TODO: Support build-scripts
+// TODO: Support build-scripts
+// TODO: Support build-scripts
+// TODO: Support build-scripts
+// TODO: Support build-scripts
+// TODO: Support build-scripts
+
 pub enum CompilerBackend {
     CargoConstruct(PathBuf),
     Rustc(PathBuf),
@@ -158,8 +167,11 @@ impl Compiler {
         let Ok(doc) = content.parse::<toml_edit::DocumentMut>() else {
             return "2021".to_string();
         };
-        doc["package"]["edition"]
-            .as_str()
+
+        // Now safely get edition
+        doc.get("package")
+            .and_then(|p| p.get("edition"))
+            .and_then(|e| e.as_str())
             .unwrap_or("2021")
             .to_string()
     }
@@ -211,9 +223,16 @@ impl Compiler {
             }
             visited.insert(dep_name.clone());
 
-            let entry = api
-                .get(&dep_name, dep_version.as_deref())
-                .ok_or_else(|| anyhow::anyhow!("could not resolve: {dep_name}"))?;
+            let entry = match api.get(&dep_name, dep_version.as_deref()) {
+                Some(entry) => entry,
+                None => {
+                    eprintln!(
+                        "warning: could not resolve dependency: {} (skipping)",
+                        dep_name
+                    );
+                    continue; // Skip unresolvable deps instead of crashing later
+                }
+            };
 
             let src_dir = Self::download_source(&dep_name, &entry.vers, Some(&entry.cksum))?;
             let edition = Self::read_edition(&src_dir);
@@ -451,21 +470,24 @@ impl Compiler {
             let level_work: Vec<(&str, std::collections::HashMap<String, std::path::PathBuf>)> =
                 level
                     .iter()
-                    .map(|name| {
-                        let node = &nodes[name];
+                    .filter_map(|name| {
+                        let node = nodes.get(name.as_str())?;
                         let externs = node
                             .direct_deps
                             .iter()
                             .filter_map(|d| compiled.get(d).map(|p| (d.clone(), p.clone())))
                             .collect();
-                        (name.as_str(), externs)
+                        Some((name.as_str(), externs))
                     })
                     .collect();
 
             let results: Vec<Result<(String, std::path::PathBuf)>> = level_work
                 .into_par_iter()
                 .map(|(name, externs)| {
-                    let node = &nodes[name];
+                    let node = nodes.get(name).ok_or_else(|| {
+                        anyhow::anyhow!("node '{}' missing from dependency tree", name)
+                    })?;
+
                     if node.has_build_script {
                         eprintln!(
                             "warning: {} has a build script — skipping precompile for this crate",
@@ -473,6 +495,7 @@ impl Compiler {
                         );
                         return Err(anyhow::anyhow!("build script: {name}"));
                     }
+
                     // `&self` is not `Send`, so it can't be moved into a rayon closure.
                     // Create a fresh Compiler per task, it's just a path + bool flag.
                     let temp_compiler = Compiler {

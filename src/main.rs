@@ -6,11 +6,12 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 pub mod ansi_color;
-mod commands;
 pub mod cache;
+mod commands;
 pub mod compiler;
 pub mod crates;
 pub mod manifest;
+pub mod progress;
 pub mod spinner;
 
 use crate::{ansi_color::AnsiColor, commands::Command as CommandTrait};
