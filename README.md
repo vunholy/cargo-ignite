@@ -2,45 +2,14 @@
 
 Fast dependency management for Rust. Reads the crates.io sparse index directly instead of going through cargo, so version resolution is near-instant.
 
+[![crates.io](https://img.shields.io/crates/v/cargo-ignite.svg)](https://crates.io/crates/cargo-ignite)
+
+```bash
+$ ignite add serde tokio@1.44 serde_json
+$ ignite install ripgrep
+$ ignite remove serde_json
+$ ignite fetch tokio --metadata
 ```
-ignite add serde tokio@1.44 serde_json
-ignite install ripgrep
-ignite remove serde_json
-ignite fetch tokio --metadata
-```
-
----
-
-## Why it's faster
-
-When you run `cargo add serde`, cargo:
-
-1. Locates and parses your workspace manifest
-2. Initializes its internal package registry and resolver
-3. Loads your `Cargo.lock` and resolves dependency constraints
-4. Validates feature compatibility across the full graph
-5. Finally writes the new line to `Cargo.toml`
-
-Steps 1-4 are the same regardless of whether you're adding one crate or ten. They exist because cargo is a general build system, not a manifest editor.
-
-`ignite add` instead:
-
-1. Reads the crates.io sparse index file directly from disk (the same file cargo caches at `~/.cargo/registry/index/`)
-2. Parses the last stable, non-yanked version using SIMD-accelerated line scanning
-3. Appends the entry to `[dependencies]` using `toml_edit` (preserves formatting and comments)
-4. Downloads the source tarball to `~/.cargo-construct/src/` if not already cached
-
-Steps 1-3 take about 12 ms. The source download (step 4) is skipped on cache hit.
-
-### What ignite does not do
-
-ignite does **not** run cargo's full semver resolver. It picks the latest stable version of each crate and resolves transitive dependencies to their own latest stable. This means:
-
-- Version constraints declared by a crate's dependencies are read but not enforced across the full graph
-- If two crates need conflicting versions of a shared dependency, ignite will not detect this — cargo will catch it on the next `cargo build`
-- Features are not validated across the dependency graph
-
-This is intentional. ignite's job is to get the right line into `Cargo.toml` fast. Cargo owns the full resolution step.
 
 ---
 
@@ -97,6 +66,39 @@ Same methodology. ignite binary compiled natively on Linux (GCC 15.2, x86_64).
 | `ignite fetch serde` | 12.5 ms | **6×** |
 
 `cargo info` is faster on Linux than Windows (no PE loader overhead), but ignite still wins by reading the local index cache directly with no cargo startup cost.
+
+---
+
+## Why it's faster
+
+When you run `cargo add serde`, cargo:
+
+1. Locates and parses your workspace manifest
+2. Initializes its internal package registry and resolver
+3. Loads your `Cargo.lock` and resolves dependency constraints
+4. Validates feature compatibility across the full graph
+5. Finally writes the new line to `Cargo.toml`
+
+Steps 1-4 are the same regardless of whether you're adding one crate or ten. They exist because cargo is a general build system, not a manifest editor.
+
+`ignite add` instead:
+
+1. Reads the crates.io sparse index file directly from disk (the same file cargo caches at `~/.cargo/registry/index/`)
+2. Parses the last stable, non-yanked version using SIMD-accelerated line scanning
+3. Appends the entry to `[dependencies]` using `toml_edit` (preserves formatting and comments)
+4. Downloads the source tarball to `~/.cargo-construct/src/` if not already cached
+
+Steps 1-3 take about 12 ms. The source download (step 4) is skipped on cache hit.
+
+### What ignite does not do
+
+ignite does **not** run cargo's full semver resolver. It picks the latest stable version of each crate and resolves transitive dependencies to their own latest stable. This means:
+
+- Version constraints declared by a crate's dependencies are read but not enforced across the full graph
+- If two crates need conflicting versions of a shared dependency, ignite will not detect this — cargo will catch it on the next `cargo build`
+- Features are not validated across the dependency graph
+
+This is intentional. ignite's job is to get the right line into `Cargo.toml` fast. Cargo owns the full resolution step.
 
 ---
 
