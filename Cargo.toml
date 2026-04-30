@@ -1,0 +1,46 @@
+[package]
+name = "cargo-hatch"
+version = "0.1.0"
+edition = "2024"
+license-file = "LICENSE"
+keywords = ["cargo", "crates", "features", "cli"]
+repository = "https://github.com/vunholy/cargo-hatch"
+categories = ["command-line-utilities", "development-tools::cargo-plugins"]
+exclude = [".cargo/config.toml"]
+
+[lib]
+name = "cargo_hatch"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cargo-hatch"
+path = "src/main.rs"
+
+[[bin]]
+name = "hatch"
+path = "src/main.rs"
+
+[dependencies]
+simd-json = "0.17.0"
+serde = { version = "1", default-features = false, features = ["derive"] }
+mimalloc = { version = "0.1.50", default-features = false }
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
+anyhow = "1.0.102"
+memchr = "2.8.0"
+blake3 = { version = "1", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+rayon = "1"
+toml_edit = "0.22"
+flate2 = "1"
+tar = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+debug = false
+incremental = false
+overflow-checks = false
+debug-assertions = false
