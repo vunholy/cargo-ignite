@@ -147,7 +147,7 @@ impl Add {
                 let label = name.clone();
                 let progress = Arc::new(CompileProgress::new(0));
                 let diag = DiagnosticCollector::new(self.verbose);
-                let sp = Spinner::new(format!("compiling {name}..."));
+                let sp = Spinner::with_progress(format!("compiling {name}..."), Arc::clone(&progress));
                 let builder = NativeBuilder::new(self.verbose)?;
                 builder.precompile_lib(
                     name,

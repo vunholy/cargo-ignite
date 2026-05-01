@@ -149,7 +149,7 @@ impl Install {
 
         let progress = Arc::new(CompileProgress::new(0));
         let diag = DiagnosticCollector::new(self.verbose);
-        let sp = Spinner::new("compiling...");
+        let sp = Spinner::with_progress("compiling...", Arc::clone(&progress));
         let builder = NativeBuilder::new(self.verbose)?;
         let bin_path = builder.install_bin(
             &self.name,
