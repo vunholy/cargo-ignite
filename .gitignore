@@ -1,3 +1,4 @@
 /target/
 .cargo/config.toml
 /docs/
+/librust_out.rlib
