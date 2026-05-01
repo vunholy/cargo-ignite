@@ -53,8 +53,8 @@ pub struct Diagnostic {
 
 #[derive(Clone)]
 pub struct DiagnosticCollector {
-    pub inner: Arc<Mutex<Vec<Diagnostic>>>,
-    pub verbose: bool,
+    pub(crate) inner: Arc<Mutex<Vec<Diagnostic>>>,
+    pub(crate) verbose: bool,
 }
 
 impl DiagnosticCollector {
@@ -75,27 +75,30 @@ impl DiagnosticCollector {
     }
 
     pub fn drain_pretty(&self) {
-        let diags = self.inner.lock().unwrap();
-        if diags.is_empty() { return; }
+        let diags: Vec<Diagnostic> = {
+            let mut guard = self.inner.lock().unwrap();
+            if guard.is_empty() { return; }
+            std::mem::take(&mut *guard)
+        }; // lock dropped here
 
         let warnings: Vec<&Diagnostic> = diags.iter().filter(|d| matches!(d.severity, Severity::Warning)).collect();
         let errors:   Vec<&Diagnostic> = diags.iter().filter(|d| matches!(d.severity, Severity::Error)).collect();
 
         if !warnings.is_empty() {
-            println!("\t  \x1b[1;37mwarnings\x1b[0m");
+            eprintln!("\t  \x1b[1;37mwarnings\x1b[0m");
             let last = warnings.len() - 1;
             for (i, d) in warnings.iter().enumerate() {
                 let branch = if i == last { "└─" } else { "├─" };
-                println!("\t    \x1b[2m{}\x1b[0m \x1b[36m{:<24}\x1b[0m \x1b[33m{}\x1b[0m", branch, d.crate_name, d.message);
+                eprintln!("\t    \x1b[2m{}\x1b[0m \x1b[36m{:<24}\x1b[0m \x1b[33m{}\x1b[0m", branch, d.crate_name, d.message);
             }
         }
 
         if !errors.is_empty() {
-            println!("\t  \x1b[1;37merrors\x1b[0m");
+            eprintln!("\t  \x1b[1;37merrors\x1b[0m");
             let last = errors.len() - 1;
             for (i, d) in errors.iter().enumerate() {
                 let branch = if i == last { "└─" } else { "├─" };
-                println!("\t    \x1b[2m{}\x1b[0m \x1b[36m{:<24}\x1b[0m \x1b[31m{}\x1b[0m", branch, d.crate_name, d.message);
+                eprintln!("\t    \x1b[2m{}\x1b[0m \x1b[36m{:<24}\x1b[0m \x1b[31m{}\x1b[0m", branch, d.crate_name, d.message);
             }
         }
     }
@@ -136,5 +139,14 @@ mod tests {
     fn test_diagnostic_collector_drain_pretty_empty_is_noop() {
         let d = DiagnosticCollector::new(false);
         d.drain_pretty();
+    }
+
+    #[test]
+    fn test_diagnostic_collector_drain_pretty_clears_buffer() {
+        let d = DiagnosticCollector::new(false);
+        d.push(Diagnostic { severity: Severity::Warning, crate_name: "foo".into(), message: "w1".into() });
+        d.push(Diagnostic { severity: Severity::Error,   crate_name: "bar".into(), message: "e1".into() });
+        d.drain_pretty(); // must not panic
+        assert_eq!(d.inner.lock().unwrap().len(), 0); // buffer must be empty after drain
     }
 }
