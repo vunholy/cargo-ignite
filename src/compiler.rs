@@ -704,7 +704,7 @@ impl NativeBuilder {
 
         let root_node = nodes.get(name)
             .ok_or_else(|| anyhow::anyhow!("root node {} not found in dep tree", name))?;
-        let bin_path = self.compile_bin(root_node, &compiled, &tmp_out, &build_outputs)?;
+        let _bin_path = self.compile_bin(root_node, &compiled, &tmp_out, &build_outputs)?;
         progress.increment();
 
         let meta = crate::cache::CacheMeta {
@@ -720,7 +720,14 @@ impl NativeBuilder {
         };
         cache.store(fp, &tmp_out, &meta)?;
         let _ = std::fs::remove_dir_all(&tmp_out);
-        Ok(bin_path)
+
+        let artifacts_dir = cache.lookup(&fp)
+            .ok_or_else(|| anyhow::anyhow!("cache lookup failed immediately after store for {}", fp))?;
+        #[cfg(windows)]
+        let cached_bin = artifacts_dir.join(format!("{name}.exe"));
+        #[cfg(not(windows))]
+        let cached_bin = artifacts_dir.join(name);
+        Ok(cached_bin)
     }
 }
 
