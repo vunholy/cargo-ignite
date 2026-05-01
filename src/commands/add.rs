@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::sync::Arc;
 
 use crate::{
     cache::{Cache, CacheKey, FeatureSet},
@@ -6,6 +7,7 @@ use crate::{
     compiler::NativeBuilder,
     crates::CratesAPI,
     manifest::Manifest,
+    progress::{CompileProgress, DiagnosticCollector},
     spinner::Spinner,
 };
 
@@ -143,6 +145,8 @@ impl Add {
                 };
 
                 let label = name.clone();
+                let progress = Arc::new(CompileProgress::new(0));
+                let diag = DiagnosticCollector::new(self.verbose);
                 let sp = Spinner::new(format!("compiling {name}..."));
                 let builder = NativeBuilder::new(self.verbose)?;
                 builder.precompile_lib(
@@ -151,10 +155,12 @@ impl Add {
                     &features_for_compile,
                     &fp,
                     &cache,
-                    self.verbose,
+                    &progress,
+                    &diag,
                 )?;
                 cache.evict_if_needed()?;
                 sp.finish_with(format!("\t  {G}{:<13}:{R} {Y}compiled{R}", label));
+                diag.drain_pretty();
             }
         }
 

@@ -1,12 +1,14 @@
 use anyhow::Result;
 use cargo_toml::Manifest;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::{
     cache::{Cache, CacheKey, FeatureSet},
     commands::Command,
     compiler::NativeBuilder,
     crates::CratesAPI,
+    progress::{CompileProgress, DiagnosticCollector},
     spinner::Spinner,
 };
 
@@ -145,6 +147,8 @@ impl Install {
             self.features.clone()
         };
 
+        let progress = Arc::new(CompileProgress::new(0));
+        let diag = DiagnosticCollector::new(self.verbose);
         let sp = Spinner::new("compiling...");
         let builder = NativeBuilder::new(self.verbose)?;
         let bin_path = builder.install_bin(
@@ -154,7 +158,8 @@ impl Install {
             &features_for_compile,
             &fp,
             &cache,
-            self.verbose,
+            &progress,
+            &diag,
         )?;
 
         std::fs::create_dir_all(&cargo_bin)?;
@@ -164,6 +169,7 @@ impl Install {
             "\t  {G}installed    :{R} {Y}{}{R}",
             cargo_bin.join(&bin_name).display()
         ));
+        diag.drain_pretty();
 
         Ok(())
     }

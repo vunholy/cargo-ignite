@@ -10,9 +10,42 @@ pub struct DepNode {
     pub src_dir: PathBuf,
 }
 
+pub struct BuildScriptOutput {
+    pub out_dir: PathBuf,
+    pub link_libs: Vec<String>,
+    pub link_search: Vec<String>,
+    pub cfg_flags: Vec<String>,
+    pub env_vars: Vec<(String, String)>,
+    pub extra_flags: Vec<String>,
+}
+
+pub struct PackageMeta {
+    pub authors: Vec<String>,
+    pub description: String,
+}
+
 pub struct NativeBuilder {
     pub rustc_path: PathBuf,
     pub verbose: bool,
+}
+
+fn target_os(triple: &str) -> &'static str {
+    if triple.contains("windows") { "windows" }
+    else if triple.contains("linux")   { "linux"   }
+    else if triple.contains("darwin")  { "macos"   }
+    else if triple.contains("freebsd") { "freebsd" }
+    else { "unknown" }
+}
+
+fn target_arch(triple: &str) -> &'static str {
+    if triple.starts_with("x86_64")  { "x86_64"  }
+    else if triple.starts_with("aarch64") { "aarch64" }
+    else if triple.starts_with("i686") || triple.starts_with("i586") { "x86" }
+    else { "unknown" }
+}
+
+fn target_family(triple: &str) -> &'static str {
+    if triple.contains("windows") { "windows" } else { "unix" }
 }
 
 impl NativeBuilder {
@@ -155,11 +188,181 @@ impl NativeBuilder {
         let _ = std::fs::write(crate_cache.join(format!("{name}-{version}.crate")), bytes);
     }
 
+    pub fn read_package_meta(src_dir: &Path) -> PackageMeta {
+        let toml_path = src_dir.join("Cargo.toml");
+        let Ok(content) = std::fs::read_to_string(&toml_path) else {
+            return PackageMeta { authors: vec![], description: String::new() };
+        };
+        let Ok(doc) = content.parse::<toml_edit::DocumentMut>() else {
+            return PackageMeta { authors: vec![], description: String::new() };
+        };
+        let authors = doc.get("package")
+            .and_then(|p| p.get("authors"))
+            .and_then(|a| a.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        let description = doc.get("package")
+            .and_then(|p| p.get("description"))
+            .and_then(|d| d.as_str())
+            .unwrap_or_default()
+            .to_string();
+        PackageMeta { authors, description }
+    }
+
+    pub fn parse_build_script_output(stdout: &str, out_dir: &Path) -> BuildScriptOutput {
+        let mut output = BuildScriptOutput {
+            out_dir: out_dir.to_path_buf(),
+            link_libs: Vec::new(),
+            link_search: Vec::new(),
+            cfg_flags: Vec::new(),
+            env_vars: Vec::new(),
+            extra_flags: Vec::new(),
+        };
+        for line in stdout.lines() {
+            if let Some(rest) = line.strip_prefix("cargo:rustc-link-lib=") {
+                output.link_libs.push(rest.to_string());
+            } else if let Some(rest) = line.strip_prefix("cargo:rustc-link-search=") {
+                output.link_search.push(rest.to_string());
+            } else if let Some(rest) = line.strip_prefix("cargo:rustc-cfg=") {
+                output.cfg_flags.push(rest.to_string());
+            } else if let Some(rest) = line.strip_prefix("cargo:rustc-env=") {
+                if let Some((k, v)) = rest.split_once('=') {
+                    output.env_vars.push((k.to_string(), v.to_string()));
+                }
+            } else if let Some(rest) = line.strip_prefix("cargo:rustc-flags=") {
+                output.extra_flags.extend(rest.split_whitespace().map(String::from));
+            }
+        }
+        output
+    }
+
+    pub fn compile_build_script(&self, node: &DepNode, tmp_dir: &Path) -> Result<PathBuf> {
+        let build_rs = node.src_dir.join("build.rs");
+        let normalized = Self::normalize_crate_name(&node.name);
+
+        #[cfg(not(windows))]
+        let out_bin = tmp_dir.join(format!("build-{normalized}"));
+        #[cfg(windows)]
+        let out_bin = tmp_dir.join(format!("build-{normalized}.exe"));
+
+        let output = std::process::Command::new(&self.rustc_path)
+            .arg("--edition").arg(&node.edition)
+            .arg("--crate-type").arg("bin")
+            .arg("--crate-name").arg(format!("build_{normalized}"))
+            .arg("-o").arg(&out_bin)
+            .arg(&build_rs)
+            .output()
+            .context("failed to spawn rustc for build script")?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "build script compile failed for {}:\n{}",
+                node.name,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(out_bin)
+    }
+
+    pub fn run_build_script(bin_path: &Path, node: &DepNode, out_dir: &Path) -> Result<BuildScriptOutput> {
+        std::fs::create_dir_all(out_dir).context("failed to create OUT_DIR")?;
+
+        let host = Self::target_triple().unwrap_or_default();
+        let num_jobs = rayon::current_num_threads().to_string();
+        let meta = Self::read_package_meta(&node.src_dir);
+
+        let output = std::process::Command::new(bin_path)
+            .current_dir(&node.src_dir)
+            .env("CARGO_MANIFEST_DIR", &node.src_dir)
+            .env("OUT_DIR",            out_dir)
+            .env("CARGO_PKG_NAME",     &node.name)
+            .env("CARGO_PKG_VERSION",  &node.version)
+            .env("CARGO_PKG_AUTHORS",  meta.authors.join(":"))
+            .env("CARGO_PKG_DESCRIPTION", meta.description)
+            .env("HOST",    &host)
+            .env("TARGET",  &host)
+            .env("OPT_LEVEL", "3")
+            .env("PROFILE",   "release")
+            .env("NUM_JOBS",  &num_jobs)
+            .env("RUSTC",     "rustc")
+            .env("CARGO_CFG_TARGET_OS",     target_os(&host))
+            .env("CARGO_CFG_TARGET_ARCH",   target_arch(&host))
+            .env("CARGO_CFG_TARGET_FAMILY", target_family(&host))
+            .output()
+            .context("failed to run build script")?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "build script failed for {}:\n{}",
+                node.name,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(Self::parse_build_script_output(&stdout, out_dir))
+    }
+
+    pub fn run_build_scripts(
+        &self,
+        levels: &[Vec<String>],
+        nodes: &std::collections::HashMap<String, DepNode>,
+        tmp_dir: &Path,
+        diag: &crate::progress::DiagnosticCollector,
+    ) -> Result<std::collections::HashMap<String, BuildScriptOutput>> {
+        use rayon::prelude::*;
+        use crate::progress::{Diagnostic, Severity};
+
+        let rustc_path = self.rustc_path.clone();
+        let verbose = self.verbose;
+        let mut outputs: std::collections::HashMap<String, BuildScriptOutput> = std::collections::HashMap::new();
+
+        for level in levels {
+            let bs_names: Vec<&str> = level.iter()
+                .filter_map(|n| {
+                    let node = nodes.get(n.as_str())?;
+                    if node.has_build_script { Some(n.as_str()) } else { None }
+                })
+                .collect();
+
+            let results: Vec<(String, Result<BuildScriptOutput>)> = bs_names
+                .into_par_iter()
+                .map(|name| {
+                    let result = (|| -> Result<BuildScriptOutput> {
+                        let node = nodes.get(name)
+                            .ok_or_else(|| anyhow::anyhow!("node '{}' missing", name))?;
+                        let out_dir = tmp_dir.join(format!("out-{}", NativeBuilder::normalize_crate_name(name)));
+                        let temp = NativeBuilder { rustc_path: rustc_path.clone(), verbose };
+                        let bin = temp.compile_build_script(node, tmp_dir)?;
+                        NativeBuilder::run_build_script(&bin, node, &out_dir)
+                    })();
+                    (name.to_string(), result)
+                })
+                .collect();
+
+            for (name, result) in results {
+                match result {
+                    Ok(bs_out) => { outputs.insert(name, bs_out); }
+                    Err(e) => {
+                        diag.push(Diagnostic {
+                            severity: Severity::Error,
+                            crate_name: name,
+                            message: e.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(outputs)
+    }
+
     pub fn build_dep_tree(
         api: &crate::crates::CratesAPI,
         name: &str,
         version: &str,
         _features: &[String],
+        diag: &crate::progress::DiagnosticCollector,
     ) -> Result<std::collections::HashMap<String, DepNode>> {
         use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -175,7 +378,11 @@ impl NativeBuilder {
             let entry = match api.get(&dep_name, dep_version.as_deref()) {
                 Some(entry) => entry,
                 None => {
-                    eprintln!("warning: could not resolve dependency: {} (skipping)", dep_name);
+                    diag.push(crate::progress::Diagnostic {
+                        severity: crate::progress::Severity::Warning,
+                        crate_name: dep_name.clone(),
+                        message: "could not resolve dependency (skipping)".into(),
+                    });
                     continue;
                 }
             };
@@ -253,6 +460,7 @@ impl NativeBuilder {
         externs: &std::collections::HashMap<String, PathBuf>,
         out_dir: &Path,
         opt_level: u32,
+        bs_out: Option<&BuildScriptOutput>,
     ) -> Result<PathBuf> {
         let src_lib = node.src_dir.join("src").join("lib.rs");
 
@@ -270,6 +478,20 @@ impl NativeBuilder {
                 rlib_path.display()
             ));
         }
+
+        if let Some(bs) = bs_out {
+            for cfg in &bs.cfg_flags {
+                cmd.arg("--cfg").arg(cfg);
+            }
+            for flag in &bs.extra_flags {
+                cmd.arg(flag);
+            }
+            cmd.env("OUT_DIR", &bs.out_dir);
+            for (k, v) in &bs.env_vars {
+                cmd.env(k, v);
+            }
+        }
+
         cmd.arg(&src_lib);
 
         let output = cmd.output().context("failed to spawn rustc")?;
@@ -297,6 +519,7 @@ impl NativeBuilder {
         node: &DepNode,
         externs: &std::collections::HashMap<String, PathBuf>,
         out_dir: &Path,
+        all_build_outputs: &std::collections::HashMap<String, BuildScriptOutput>,
     ) -> Result<PathBuf> {
         let src_main = node.src_dir.join("src").join("main.rs");
 
@@ -314,6 +537,18 @@ impl NativeBuilder {
                 rlib_path.display()
             ));
         }
+
+        if let Some(bs) = all_build_outputs.get(&node.name) {
+            for cfg in &bs.cfg_flags { cmd.arg("--cfg").arg(cfg); }
+            cmd.env("OUT_DIR", &bs.out_dir);
+            for (k, v) in &bs.env_vars { cmd.env(k, v); }
+        }
+
+        for bs in all_build_outputs.values() {
+            for lib  in &bs.link_libs   { cmd.arg("-l").arg(lib);  }
+            for path in &bs.link_search { cmd.arg("-L").arg(path); }
+        }
+
         cmd.arg(&src_main);
 
         let output = cmd.output().context("failed to spawn rustc")?;
@@ -339,8 +574,12 @@ impl NativeBuilder {
         nodes: &std::collections::HashMap<String, DepNode>,
         out_dir: &Path,
         opt_level: u32,
+        build_outputs: &std::collections::HashMap<String, BuildScriptOutput>,
+        progress: &std::sync::Arc<crate::progress::CompileProgress>,
+        diag: &crate::progress::DiagnosticCollector,
     ) -> Result<std::collections::HashMap<String, PathBuf>> {
         use rayon::prelude::*;
+        use crate::progress::{Diagnostic, Severity};
 
         let rustc_path = self.rustc_path.clone();
         let verbose = self.verbose;
@@ -358,28 +597,33 @@ impl NativeBuilder {
                 })
                 .collect();
 
-            let results: Vec<Result<(String, PathBuf)>> = level_work
+            let results: Vec<(String, Result<PathBuf>)> = level_work
                 .into_par_iter()
                 .map(|(name, externs)| {
-                    let node = nodes.get(name)
-                        .ok_or_else(|| anyhow::anyhow!("node '{}' missing from dependency tree", name))?;
-
-                    if node.has_build_script {
-                        eprintln!(" warning: {} has a build script — skipping precompile for this crate", name);
-                        return Err(anyhow::anyhow!("build script: {name}"));
-                    }
-
-                    let temp = NativeBuilder { rustc_path: rustc_path.clone(), verbose };
-                    let rlib = temp.compile_lib(node, &externs, out_dir, opt_level)?;
-                    Ok((name.to_string(), rlib))
+                    let result = (|| -> Result<PathBuf> {
+                        let node = nodes.get(name)
+                            .ok_or_else(|| anyhow::anyhow!("node '{}' missing from dependency tree", name))?;
+                        let bs_out = build_outputs.get(name);
+                        let temp = NativeBuilder { rustc_path: rustc_path.clone(), verbose };
+                        temp.compile_lib(node, &externs, out_dir, opt_level, bs_out)
+                    })();
+                    (name.to_string(), result)
                 })
                 .collect();
 
-            for r in results {
-                match r {
-                    Ok((name, path)) => { compiled.insert(name, path); }
-                    Err(e) if e.to_string().starts_with("build script:") => {}
-                    Err(e) => return Err(e),
+            for (name, result) in results {
+                match result {
+                    Ok(path) => {
+                        progress.increment();
+                        compiled.insert(name, path);
+                    }
+                    Err(e) => {
+                        diag.push(Diagnostic {
+                            severity: Severity::Error,
+                            crate_name: name,
+                            message: e.to_string(),
+                        });
+                    }
                 }
             }
         }
@@ -394,19 +638,23 @@ impl NativeBuilder {
         features: &[String],
         fp: &str,
         cache: &crate::cache::Cache,
-        verbose: bool,
+        progress: &std::sync::Arc<crate::progress::CompileProgress>,
+        diag: &crate::progress::DiagnosticCollector,
     ) -> Result<()> {
         let api = crate::crates::CratesAPI::new();
-        let nodes = Self::build_dep_tree(&api, name, version, features)?;
+        let nodes = Self::build_dep_tree(&api, name, version, features, diag)?;
         let levels = Self::topo_sort(&nodes);
+
+        progress.set_total(nodes.len());
 
         let tmp_out = std::env::temp_dir().join(format!("ignite-lib-{fp}"));
         std::fs::create_dir_all(&tmp_out)?;
 
-        let compiled = self.compile_all(&levels, &nodes, &tmp_out, 0)?;
+        let build_outputs = self.run_build_scripts(&levels, &nodes, &tmp_out, diag)?;
+        let compiled = self.compile_all(&levels, &nodes, &tmp_out, 0, &build_outputs, progress, diag)?;
 
         if compiled.is_empty() {
-            anyhow::bail!("no crates compiled — all may have build scripts requiring cargo-construct");
+            anyhow::bail!("no crates compiled — all may have failed or have unresolvable build scripts");
         }
 
         let meta = crate::cache::CacheMeta {
@@ -421,11 +669,6 @@ impl NativeBuilder {
                 .as_secs(),
         };
         cache.store(fp, &tmp_out, &meta)?;
-
-        if verbose {
-            eprintln!("precompiled {} v{} → cached as {fp}", name, version);
-        }
-
         let _ = std::fs::remove_dir_all(&tmp_out);
         Ok(())
     }
@@ -435,28 +678,34 @@ impl NativeBuilder {
         &self,
         name: &str,
         version: &str,
-        cksum: Option<&str>,
+        _cksum: Option<&str>,
         features: &[String],
         fp: &str,
         cache: &crate::cache::Cache,
-        verbose: bool,
+        progress: &std::sync::Arc<crate::progress::CompileProgress>,
+        diag: &crate::progress::DiagnosticCollector,
     ) -> Result<PathBuf> {
         let api = crate::crates::CratesAPI::new();
-        let nodes = Self::build_dep_tree(&api, name, version, features)?;
+        let nodes = Self::build_dep_tree(&api, name, version, features, diag)?;
         let levels = Self::topo_sort(&nodes);
+
+        progress.set_total(nodes.len());
 
         let tmp_out = std::env::temp_dir().join(format!("ignite-bin-{fp}"));
         std::fs::create_dir_all(&tmp_out)?;
+
+        let build_outputs = self.run_build_scripts(&levels, &nodes, &tmp_out, diag)?;
 
         let dep_levels: Vec<Vec<String>> = levels.iter()
             .filter(|l| !l.contains(&name.to_string()))
             .cloned()
             .collect();
-        let compiled = self.compile_all(&dep_levels, &nodes, &tmp_out, 3)?;
+        let compiled = self.compile_all(&dep_levels, &nodes, &tmp_out, 3, &build_outputs, progress, diag)?;
 
         let root_node = nodes.get(name)
             .ok_or_else(|| anyhow::anyhow!("root node {} not found in dep tree", name))?;
-        let bin_path = self.compile_bin(root_node, &compiled, &tmp_out)?;
+        let bin_path = self.compile_bin(root_node, &compiled, &tmp_out, &build_outputs)?;
+        progress.increment();
 
         let meta = crate::cache::CacheMeta {
             crate_name: name.to_string(),
@@ -470,11 +719,7 @@ impl NativeBuilder {
                 .as_secs(),
         };
         cache.store(fp, &tmp_out, &meta)?;
-
-        if verbose {
-            eprintln!("installed {} v{} → cached as {fp}", name, version);
-        }
-
+        let _ = std::fs::remove_dir_all(&tmp_out);
         Ok(bin_path)
     }
 }
@@ -543,7 +788,7 @@ mod tests {
         use std::collections::HashMap;
         let nodes: HashMap<String, DepNode> = [
             ("a".to_string(), DepNode { name: "a".to_string(), version: "1.0.0".to_string(), edition: "2021".to_string(), direct_deps: vec!["b".to_string()], has_build_script: false, src_dir: PathBuf::from("/fake/a") }),
-            ("b".to_string(), DepNode { name: "b".to_string(), version: "1.0.0".to_string(), edition: "2021".to_string(), direct_deps: vec!["c".to_string()], has_build_script: false, src_dir: PathBuf::from("/fake/b") }),
+            ("b".to_string(), DepNode { name: "b".to_string(), version: "1.0.0".to_string(), edition: "2021".to_string(), direct_deps: vec!["c".to_string()], has_build_script: false, src_dir: PathBuf::from("/fake/c") }),
             ("c".to_string(), DepNode { name: "c".to_string(), version: "1.0.0".to_string(), edition: "2021".to_string(), direct_deps: vec![], has_build_script: false, src_dir: PathBuf::from("/fake/c") }),
         ].into_iter().collect();
 
@@ -552,5 +797,54 @@ mod tests {
         assert_eq!(levels[0], vec!["c".to_string()]);
         assert_eq!(levels[1], vec!["b".to_string()]);
         assert_eq!(levels[2], vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_build_script_output_empty() {
+        let bs = NativeBuilder::parse_build_script_output("", std::path::Path::new("/tmp/out"));
+        assert!(bs.link_libs.is_empty());
+        assert!(bs.cfg_flags.is_empty());
+        assert!(bs.env_vars.is_empty());
+    }
+
+    #[test]
+    fn test_parse_build_script_output_directives() {
+        let stdout = "cargo:rustc-link-lib=static=foo\ncargo:rustc-cfg=feature=\"bar\"\ncargo:rustc-env=MY_VAR=hello\ncargo:rustc-link-search=native=/usr/lib\ncargo:rustc-flags=-L extra\n";
+        let bs = NativeBuilder::parse_build_script_output(stdout, std::path::Path::new("/tmp/out"));
+        assert_eq!(bs.link_libs,   vec!["static=foo"]);
+        assert_eq!(bs.cfg_flags,   vec!["feature=\"bar\""]);
+        assert_eq!(bs.env_vars,    vec![("MY_VAR".to_string(), "hello".to_string())]);
+        assert_eq!(bs.link_search, vec!["native=/usr/lib"]);
+        assert_eq!(bs.extra_flags, vec!["-L", "extra"]);
+    }
+
+    #[test]
+    fn test_compile_and_run_simple_build_script() {
+        if NativeBuilder::rustc_version().is_err() { return; }
+
+        let builder = NativeBuilder::new(false).unwrap();
+        let tmp = std::env::temp_dir().join("ignite-test-bs");
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        std::fs::write(tmp.join("build.rs"), r#"fn main() { println!("cargo:rustc-cfg=my_test_feature"); }"#).unwrap();
+        std::fs::write(tmp.join("Cargo.toml"), "[package]\nname = \"test-crate\"\nversion = \"0.1.0\"\nedition = \"2021\"\n").unwrap();
+
+        let node = DepNode {
+            name: "test-crate".to_string(),
+            version: "0.1.0".to_string(),
+            edition: "2021".to_string(),
+            direct_deps: vec![],
+            has_build_script: true,
+            src_dir: tmp.clone(),
+        };
+
+        let bin = builder.compile_build_script(&node, &tmp).unwrap();
+        assert!(bin.exists(), "compiled build script binary should exist");
+
+        let out_dir = tmp.join("out");
+        let bs_out = NativeBuilder::run_build_script(&bin, &node, &out_dir).unwrap();
+        assert_eq!(bs_out.cfg_flags, vec!["my_test_feature"]);
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
