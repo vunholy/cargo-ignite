@@ -3,4 +3,5 @@ pub mod cache;
 pub mod compiler;
 pub mod crates;
 pub mod manifest;
+pub mod progress;
 pub mod spinner;
