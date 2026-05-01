@@ -1,20 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-// TODO: Support build-scripts
-// TODO: Support build-scripts
-// TODO: Support build-scripts
-// TODO: Support build-scripts
-// TODO: Support build-scripts
-// TODO: Support build-scripts
-// TODO: Support build-scripts
-// TODO: Support build-scripts
-
-pub enum CompilerBackend {
-    CargoConstruct(PathBuf),
-    Rustc(PathBuf),
-}
-
 pub struct DepNode {
     pub name: String,
     pub version: String,
@@ -24,32 +10,20 @@ pub struct DepNode {
     pub src_dir: PathBuf,
 }
 
-pub struct Compiler {
-    pub backend: CompilerBackend,
+pub struct NativeBuilder {
+    pub rustc_path: PathBuf,
     pub verbose: bool,
 }
 
-impl Compiler {
-    pub fn detect(verbose: bool) -> Result<Self> {
-        if let Some(path) = Self::find_in_path("cargo-construct") {
-            if verbose {
-                eprintln!("compiler: using cargo-construct at {}", path.display());
-            }
-            return Ok(Self {
-                backend: CompilerBackend::CargoConstruct(path),
-                verbose,
-            });
-        }
+impl NativeBuilder {
+    pub fn new(verbose: bool) -> Result<Self> {
         let rustc = Self::find_in_path("rustc").ok_or_else(|| {
             anyhow::anyhow!("rustc not found in PATH — install Rust from https://rustup.rs")
         })?;
         if verbose {
             eprintln!("compiler: using rustc at {}", rustc.display());
         }
-        Ok(Self {
-            backend: CompilerBackend::Rustc(rustc),
-            verbose,
-        })
+        Ok(Self { rustc_path: rustc, verbose })
     }
 
     pub fn rustc_version() -> Result<String> {
@@ -107,9 +81,7 @@ impl Compiler {
         }
         None
     }
-}
 
-impl Compiler {
     pub fn download_source(name: &str, version: &str, cksum: Option<&str>) -> Result<PathBuf> {
         let src_dir = Self::ignite_src_dir()?.join(format!("{name}-{version}"));
         if src_dir.exists() {
@@ -118,10 +90,7 @@ impl Compiler {
 
         let url = format!("https://static.crates.io/crates/{name}/{name}-{version}.crate");
         let bytes = ureq::get(&url)
-            .header(
-                "User-Agent",
-                concat!("cargo-ignite/", env!("CARGO_PKG_VERSION")),
-            )
+            .header("User-Agent", concat!("cargo-ignite/", env!("CARGO_PKG_VERSION")))
             .call()
             .context("failed to download crate tarball")?
             .into_body()
@@ -137,21 +106,15 @@ impl Compiler {
         std::fs::create_dir_all(&parent)?;
         let gz = flate2::read::GzDecoder::new(&bytes[..]);
         let mut archive = tar::Archive::new(gz);
-        archive
-            .unpack(&parent)
-            .context("failed to extract crate tarball")?;
+        archive.unpack(&parent).context("failed to extract crate tarball")?;
 
-        // Written after a successful unpack; writing before would leave a corrupt
-        // .crate file in cargo's own registry cache if extraction fails mid-stream.
         Self::save_to_cargo_registry(name, version, &bytes);
-
         Ok(src_dir)
     }
 
     fn verify_cksum(bytes: &[u8], expected_hex: &str) -> Result<()> {
         use sha2::{Digest, Sha256};
         let hash = Sha256::digest(bytes);
-        // Format without the `hex` crate to keep dependencies minimal.
         let computed: String = hash.iter().map(|b| format!("{b:02x}")).collect();
         if computed != expected_hex {
             anyhow::bail!("expected {expected_hex}, got {computed}");
@@ -167,8 +130,6 @@ impl Compiler {
         let Ok(doc) = content.parse::<toml_edit::DocumentMut>() else {
             return "2021".to_string();
         };
-
-        // Now safely get edition
         doc.get("package")
             .and_then(|p| p.get("edition"))
             .and_then(|e| e.as_str())
@@ -185,25 +146,15 @@ impl Compiler {
     }
 
     fn save_to_cargo_registry(name: &str, version: &str, bytes: &[u8]) {
-        let Some(index_cache) = crate::crates::CratesAPI::index_cache_dir() else {
-            return;
-        };
-        let Some(index_dir) = index_cache.parent() else {
-            return;
-        };
-        let Some(registry_dir) = index_dir.parent().and_then(|p| p.parent()) else {
-            return;
-        };
-        let Some(dir_name) = index_dir.file_name() else {
-            return;
-        };
+        let Some(index_cache) = crate::crates::CratesAPI::index_cache_dir() else { return; };
+        let Some(index_dir) = index_cache.parent() else { return; };
+        let Some(registry_dir) = index_dir.parent().and_then(|p| p.parent()) else { return; };
+        let Some(dir_name) = index_dir.file_name() else { return; };
         let crate_cache = registry_dir.join("cache").join(dir_name);
         let _ = std::fs::create_dir_all(&crate_cache);
         let _ = std::fs::write(crate_cache.join(format!("{name}-{version}.crate")), bytes);
     }
 
-    /// Recursively resolve the full compile-time dependency tree for `name@version`.
-    /// Dev and build deps (kind != "normal") and optional deps are excluded.
     pub fn build_dep_tree(
         api: &crate::crates::CratesAPI,
         name: &str,
@@ -218,19 +169,14 @@ impl Compiler {
         queue.push_back((name.to_string(), Some(version.to_string())));
 
         while let Some((dep_name, dep_version)) = queue.pop_front() {
-            if visited.contains(&dep_name) {
-                continue;
-            }
+            if visited.contains(&dep_name) { continue; }
             visited.insert(dep_name.clone());
 
             let entry = match api.get(&dep_name, dep_version.as_deref()) {
                 Some(entry) => entry,
                 None => {
-                    eprintln!(
-                        "warning: could not resolve dependency: {} (skipping)",
-                        dep_name
-                    );
-                    continue; // Skip unresolvable deps instead of crashing later
+                    eprintln!("warning: could not resolve dependency: {} (skipping)", dep_name);
+                    continue;
                 }
             };
 
@@ -238,64 +184,47 @@ impl Compiler {
             let edition = Self::read_edition(&src_dir);
             let has_build_script = src_dir.join("build.rs").exists();
 
-            let direct_deps: Vec<String> = entry
-                .deps
-                .iter()
+            let direct_deps: Vec<String> = entry.deps.iter()
                 .filter(|d| d.kind == "normal" && !d.optional)
                 .map(|d| d.name.clone())
                 .collect();
 
             for d in &direct_deps {
                 if !visited.contains(d) {
-                    // None version = resolve to latest stable. We can't run cargo's
-                    // full semver resolver without cargo, so latest is close enough
-                    // for precompile/install purposes.
                     queue.push_back((d.clone(), None));
                 }
             }
 
-            nodes.insert(
-                dep_name.clone(),
-                DepNode {
-                    name: dep_name,
-                    version: entry.vers,
-                    edition,
-                    direct_deps,
-                    has_build_script,
-                    src_dir,
-                },
-            );
+            nodes.insert(dep_name.clone(), DepNode {
+                name: dep_name,
+                version: entry.vers,
+                edition,
+                direct_deps,
+                has_build_script,
+                src_dir,
+            });
         }
 
         Ok(nodes)
     }
 
-    /// Topological sort using Kahn's algorithm.
-    /// Returns levels: nodes within the same level can be compiled in parallel.
-    /// Level 0 = leaves (no deps), last level = root.
     pub fn topo_sort(nodes: &std::collections::HashMap<String, DepNode>) -> Vec<Vec<String>> {
         use std::collections::HashMap;
 
         let mut in_degree: HashMap<String, usize> = nodes.keys().map(|k| (k.clone(), 0)).collect();
-
-        let mut dependents: HashMap<String, Vec<String>> =
-            nodes.keys().map(|k| (k.clone(), vec![])).collect();
+        let mut dependents: HashMap<String, Vec<String>> = nodes.keys().map(|k| (k.clone(), vec![])).collect();
 
         for (name, node) in nodes {
             for dep in &node.direct_deps {
                 if nodes.contains_key(dep) {
                     *in_degree.get_mut(name).unwrap() += 1;
-                    dependents
-                        .entry(dep.clone())
-                        .or_default()
-                        .push(name.clone());
+                    dependents.entry(dep.clone()).or_default().push(name.clone());
                 }
             }
         }
 
         let mut levels: Vec<Vec<String>> = Vec::new();
-        let mut ready: Vec<String> = in_degree
-            .iter()
+        let mut ready: Vec<String> = in_degree.iter()
             .filter(|&(_, v)| *v == 0)
             .map(|(k, _)| k.clone())
             .collect();
@@ -308,9 +237,7 @@ impl Compiler {
                 for dependent in dependents.get(name).unwrap_or(&vec![]) {
                     let d = in_degree.get_mut(dependent).unwrap();
                     *d -= 1;
-                    if *d == 0 {
-                        next.push(dependent.clone());
-                    }
+                    if *d == 0 { next.push(dependent.clone()); }
                 }
             }
             next.sort();
@@ -320,40 +247,21 @@ impl Compiler {
         levels
     }
 
-    /// Compile a library crate to `.rlib`. Returns path to the output rlib.
     pub fn compile_lib(
         &self,
         node: &DepNode,
-        externs: &std::collections::HashMap<String, std::path::PathBuf>,
-        out_dir: &std::path::Path,
+        externs: &std::collections::HashMap<String, PathBuf>,
+        out_dir: &Path,
         opt_level: u32,
-    ) -> Result<std::path::PathBuf> {
-        if node.has_build_script {
-            anyhow::bail!(
-                "{} has a build script — cargo-construct required for precompile",
-                node.name
-            );
-        }
+    ) -> Result<PathBuf> {
         let src_lib = node.src_dir.join("src").join("lib.rs");
-        let rustc = match &self.backend {
-            CompilerBackend::Rustc(p) => p,
-            CompilerBackend::CargoConstruct(_) => {
-                return Err(anyhow::anyhow!(
-                    "compile_lib called on CargoConstruct backend"
-                ));
-            }
-        };
 
-        let mut cmd = std::process::Command::new(rustc);
-        cmd.arg("--edition")
-            .arg(&node.edition)
-            .arg("--crate-type")
-            .arg("rlib")
-            .arg("--crate-name")
-            .arg(Self::normalize_crate_name(&node.name))
-            .arg(format!("-Copt-level={opt_level}"))
-            .arg("--out-dir")
-            .arg(out_dir);
+        let mut cmd = std::process::Command::new(&self.rustc_path);
+        cmd.arg("--edition").arg(&node.edition)
+           .arg("--crate-type").arg("rlib")
+           .arg("--crate-name").arg(Self::normalize_crate_name(&node.name))
+           .arg(format!("-Copt-level={opt_level}"))
+           .arg("--out-dir").arg(out_dir);
 
         for (dep_name, rlib_path) in externs {
             cmd.arg("--extern").arg(format!(
@@ -363,10 +271,6 @@ impl Compiler {
             ));
         }
         cmd.arg(&src_lib);
-
-        if self.verbose {
-            eprintln!("rustc: compiling {}", node.name);
-        }
 
         let output = cmd.output().context("failed to spawn rustc")?;
         if !output.status.success() {
@@ -385,38 +289,23 @@ impl Compiler {
                 n.starts_with(&lib_prefix) && n.ends_with(".rlib")
             })
             .map(|e| e.path())
-            .ok_or_else(|| {
-                anyhow::anyhow!("rlib not found for {} in {}", node.name, out_dir.display())
-            })
+            .ok_or_else(|| anyhow::anyhow!("rlib not found for {} in {}", node.name, out_dir.display()))
     }
 
-    /// Compile a binary crate. Returns path to the produced binary.
     pub fn compile_bin(
         &self,
         node: &DepNode,
-        externs: &std::collections::HashMap<String, std::path::PathBuf>,
-        out_dir: &std::path::Path,
-    ) -> Result<std::path::PathBuf> {
+        externs: &std::collections::HashMap<String, PathBuf>,
+        out_dir: &Path,
+    ) -> Result<PathBuf> {
         let src_main = node.src_dir.join("src").join("main.rs");
-        let rustc = match &self.backend {
-            CompilerBackend::Rustc(p) => p,
-            CompilerBackend::CargoConstruct(_) => {
-                return Err(anyhow::anyhow!(
-                    "compile_bin called on CargoConstruct backend"
-                ));
-            }
-        };
 
-        let mut cmd = std::process::Command::new(rustc);
-        cmd.arg("--edition")
-            .arg(&node.edition)
-            .arg("--crate-type")
-            .arg("bin")
-            .arg("--crate-name")
-            .arg(Self::normalize_crate_name(&node.name))
-            .arg("-Copt-level=3")
-            .arg("--out-dir")
-            .arg(out_dir);
+        let mut cmd = std::process::Command::new(&self.rustc_path);
+        cmd.arg("--edition").arg(&node.edition)
+           .arg("--crate-type").arg("bin")
+           .arg("--crate-name").arg(Self::normalize_crate_name(&node.name))
+           .arg("-Copt-level=3")
+           .arg("--out-dir").arg(out_dir);
 
         for (dep_name, rlib_path) in externs {
             cmd.arg("--extern").arg(format!(
@@ -444,74 +333,51 @@ impl Compiler {
         Ok(bin)
     }
 
-    /// Compile all nodes level-by-level using rayon within each level.
-    /// Returns a map of crate_name to rlib_path for all compiled nodes.
     pub fn compile_all(
         &self,
         levels: &[Vec<String>],
         nodes: &std::collections::HashMap<String, DepNode>,
-        out_dir: &std::path::Path,
+        out_dir: &Path,
         opt_level: u32,
-    ) -> Result<std::collections::HashMap<String, std::path::PathBuf>> {
+    ) -> Result<std::collections::HashMap<String, PathBuf>> {
         use rayon::prelude::*;
 
-        let backend_path = match &self.backend {
-            CompilerBackend::Rustc(p) => p.clone(),
-            CompilerBackend::CargoConstruct(_) => {
-                return Ok(std::collections::HashMap::new()); // can't parallel-compile with cargo-construct
-            }
-        };
+        let rustc_path = self.rustc_path.clone();
         let verbose = self.verbose;
-
-        let mut compiled: std::collections::HashMap<String, std::path::PathBuf> =
-            std::collections::HashMap::new();
+        let mut compiled: std::collections::HashMap<String, PathBuf> = std::collections::HashMap::new();
 
         for level in levels {
-            let level_work: Vec<(&str, std::collections::HashMap<String, std::path::PathBuf>)> =
-                level
-                    .iter()
-                    .filter_map(|name| {
-                        let node = nodes.get(name.as_str())?;
-                        let externs = node
-                            .direct_deps
-                            .iter()
-                            .filter_map(|d| compiled.get(d).map(|p| (d.clone(), p.clone())))
-                            .collect();
-                        Some((name.as_str(), externs))
-                    })
-                    .collect();
+            let level_work: Vec<(&str, std::collections::HashMap<String, PathBuf>)> = level
+                .iter()
+                .filter_map(|name| {
+                    let node = nodes.get(name.as_str())?;
+                    let externs = node.direct_deps.iter()
+                        .filter_map(|d| compiled.get(d).map(|p| (d.clone(), p.clone())))
+                        .collect();
+                    Some((name.as_str(), externs))
+                })
+                .collect();
 
-            let results: Vec<Result<(String, std::path::PathBuf)>> = level_work
+            let results: Vec<Result<(String, PathBuf)>> = level_work
                 .into_par_iter()
                 .map(|(name, externs)| {
-                    let node = nodes.get(name).ok_or_else(|| {
-                        anyhow::anyhow!("node '{}' missing from dependency tree", name)
-                    })?;
+                    let node = nodes.get(name)
+                        .ok_or_else(|| anyhow::anyhow!("node '{}' missing from dependency tree", name))?;
 
                     if node.has_build_script {
-                        eprintln!(
-                            " warning: {} has a build script — skipping precompile for this crate",
-                            name
-                        );
+                        eprintln!(" warning: {} has a build script — skipping precompile for this crate", name);
                         return Err(anyhow::anyhow!("build script: {name}"));
                     }
 
-                    // `&self` is not `Send`, so it can't be moved into a rayon closure.
-                    // Create a fresh Compiler per task, it's just a path + bool flag.
-                    let temp_compiler = Compiler {
-                        backend: CompilerBackend::Rustc(backend_path.clone()),
-                        verbose,
-                    };
-                    let rlib = temp_compiler.compile_lib(node, &externs, out_dir, opt_level)?;
+                    let temp = NativeBuilder { rustc_path: rustc_path.clone(), verbose };
+                    let rlib = temp.compile_lib(node, &externs, out_dir, opt_level)?;
                     Ok((name.to_string(), rlib))
                 })
                 .collect();
 
             for r in results {
                 match r {
-                    Ok((name, path)) => {
-                        compiled.insert(name, path);
-                    }
+                    Ok((name, path)) => { compiled.insert(name, path); }
                     Err(e) if e.to_string().starts_with("build script:") => {}
                     Err(e) => return Err(e),
                 }
@@ -521,8 +387,6 @@ impl Compiler {
         Ok(compiled)
     }
 
-    /// Full library pre-compilation pipeline for `ignite add --precompile`.
-    /// Downloads dep tree, compiles all nodes, stores artifacts in cache.
     pub fn precompile_lib(
         &self,
         name: &str,
@@ -542,9 +406,7 @@ impl Compiler {
         let compiled = self.compile_all(&levels, &nodes, &tmp_out, 0)?;
 
         if compiled.is_empty() {
-            anyhow::bail!(
-                "no crates compiled — all may have build scripts requiring cargo-construct"
-            );
+            anyhow::bail!("no crates compiled — all may have build scripts requiring cargo-construct");
         }
 
         let meta = crate::cache::CacheMeta {
@@ -568,9 +430,6 @@ impl Compiler {
         Ok(())
     }
 
-    /// Full binary compilation + install pipeline for `ignite install`.
-    /// Downloads dep tree, compiles deps + binary, stores in cache.
-    /// Returns path of the compiled binary.
     #[allow(clippy::too_many_arguments)]
     pub fn install_bin(
         &self,
@@ -582,78 +441,41 @@ impl Compiler {
         cache: &crate::cache::Cache,
         verbose: bool,
     ) -> Result<PathBuf> {
-        match &self.backend {
-            CompilerBackend::CargoConstruct(cc_path) => {
-                let cc_path = cc_path.clone();
-                let src_dir = Self::download_source(name, version, cksum)?;
-                let status = std::process::Command::new(&cc_path)
-                    .arg("release")
-                    .current_dir(&src_dir)
-                    .status()
-                    .context("failed to spawn cargo-construct")?;
-                if !status.success() {
-                    anyhow::bail!("cargo-construct failed for {}", name);
-                }
-                #[cfg(windows)]
-                let bin_name = format!("{name}.exe");
-                #[cfg(not(windows))]
-                let bin_name = name.to_string();
+        let api = crate::crates::CratesAPI::new();
+        let nodes = Self::build_dep_tree(&api, name, version, features)?;
+        let levels = Self::topo_sort(&nodes);
 
-                let bin_path = src_dir.join("target").join("release").join(&bin_name);
-                let artifacts_dir = src_dir.join("target").join("release");
-                let meta = crate::cache::CacheMeta {
-                    crate_name: name.to_string(),
-                    version: version.to_string(),
-                    features: features.join(","),
-                    rustc: Self::rustc_version().unwrap_or_default(),
-                    target: Self::target_triple().unwrap_or_default(),
-                    cached_at: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
-                };
-                cache.store(fp, &artifacts_dir, &meta)?;
-                Ok(bin_path)
-            }
-            CompilerBackend::Rustc(_) => {
-                let api = crate::crates::CratesAPI::new();
-                let nodes = Self::build_dep_tree(&api, name, version, features)?;
-                let levels = Self::topo_sort(&nodes);
+        let tmp_out = std::env::temp_dir().join(format!("ignite-bin-{fp}"));
+        std::fs::create_dir_all(&tmp_out)?;
 
-                let tmp_out = std::env::temp_dir().join(format!("ignite-bin-{fp}"));
-                std::fs::create_dir_all(&tmp_out)?;
+        let dep_levels: Vec<Vec<String>> = levels.iter()
+            .filter(|l| !l.contains(&name.to_string()))
+            .cloned()
+            .collect();
+        let compiled = self.compile_all(&dep_levels, &nodes, &tmp_out, 3)?;
 
-                let dep_levels: Vec<Vec<String>> = levels
-                    .iter()
-                    .filter(|l| !l.contains(&name.to_string()))
-                    .cloned()
-                    .collect();
-                let compiled = self.compile_all(&dep_levels, &nodes, &tmp_out, 3)?;
+        let root_node = nodes.get(name)
+            .ok_or_else(|| anyhow::anyhow!("root node {} not found in dep tree", name))?;
+        let bin_path = self.compile_bin(root_node, &compiled, &tmp_out)?;
 
-                let root_node = nodes
-                    .get(name)
-                    .ok_or_else(|| anyhow::anyhow!("root node {} not found in dep tree", name))?;
-                let bin_path = self.compile_bin(root_node, &compiled, &tmp_out)?;
+        let meta = crate::cache::CacheMeta {
+            crate_name: name.to_string(),
+            version: version.to_string(),
+            features: features.join(","),
+            rustc: Self::rustc_version().unwrap_or_default(),
+            target: Self::target_triple().unwrap_or_default(),
+            cached_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+        cache.store(fp, &tmp_out, &meta)?;
 
-                let meta = crate::cache::CacheMeta {
-                    crate_name: name.to_string(),
-                    version: version.to_string(),
-                    features: features.join(","),
-                    rustc: Self::rustc_version().unwrap_or_default(),
-                    target: Self::target_triple().unwrap_or_default(),
-                    cached_at: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
-                };
-                cache.store(fp, &tmp_out, &meta)?;
-
-                if verbose {
-                    eprintln!("installed {} v{} → cached as {fp}", name, version);
-                }
-                Ok(bin_path)
-            }
+        if verbose {
+            eprintln!("installed {} v{} → cached as {fp}", name, version);
         }
+
+        Ok(bin_path)
     }
 }
 
@@ -662,37 +484,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_native_builder_new() {
+        let b = NativeBuilder::new(false).expect("rustc must be in PATH for tests");
+        assert!(b.rustc_path.exists());
+        assert!(!b.verbose);
+    }
+
+    #[test]
     fn test_rustc_version_format() {
-        let v = Compiler::rustc_version().expect("rustc must be in PATH for tests");
+        let v = NativeBuilder::rustc_version().expect("rustc must be in PATH for tests");
         let parts: Vec<&str> = v.split('.').collect();
-        assert_eq!(
-            parts.len(),
-            3,
-            "version should be major.minor.patch, got: {v}"
-        );
-        assert!(
-            parts.iter().all(|p| p.parse::<u32>().is_ok()),
-            "each part must be numeric"
-        );
+        assert_eq!(parts.len(), 3, "version should be major.minor.patch, got: {v}");
+        assert!(parts.iter().all(|p| p.parse::<u32>().is_ok()), "each part must be numeric");
     }
 
     #[test]
     fn test_target_triple_nonempty() {
-        let t = Compiler::target_triple().expect("rustc must be in PATH for tests");
+        let t = NativeBuilder::target_triple().expect("rustc must be in PATH for tests");
         assert!(!t.is_empty());
-        assert!(
-            t.contains('-'),
-            "target triple should contain hyphens, got: {t}"
-        );
+        assert!(t.contains('-'), "target triple should contain hyphens, got: {t}");
     }
 
     #[test]
     fn test_crate_name_normalize() {
-        assert_eq!(
-            Compiler::normalize_crate_name("serde-derive"),
-            "serde_derive"
-        );
-        assert_eq!(Compiler::normalize_crate_name("tokio"), "tokio");
+        assert_eq!(NativeBuilder::normalize_crate_name("serde-derive"), "serde_derive");
+        assert_eq!(NativeBuilder::normalize_crate_name("tokio"), "tokio");
     }
 
     #[test]
@@ -700,136 +516,38 @@ mod tests {
         let dir = std::env::temp_dir().join("ignite-test-build-rs");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-
         assert!(!dir.join("build.rs").exists());
-
         std::fs::write(dir.join("build.rs"), b"fn main() {}").unwrap();
         assert!(dir.join("build.rs").exists());
-
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn test_topo_sort_leaves_first() {
         use std::collections::HashMap;
-        // A depends on B and C; B and C have no deps
-        // Expected levels: [["b","c"], ["a"]]
         let nodes: HashMap<String, DepNode> = [
-            (
-                "a".to_string(),
-                DepNode {
-                    name: "a".to_string(),
-                    version: "1.0.0".to_string(),
-                    edition: "2021".to_string(),
-                    direct_deps: vec!["b".to_string(), "c".to_string()],
-                    has_build_script: false,
-                    src_dir: std::path::PathBuf::from("/fake/a"),
-                },
-            ),
-            (
-                "b".to_string(),
-                DepNode {
-                    name: "b".to_string(),
-                    version: "1.0.0".to_string(),
-                    edition: "2021".to_string(),
-                    direct_deps: vec![],
-                    has_build_script: false,
-                    src_dir: std::path::PathBuf::from("/fake/b"),
-                },
-            ),
-            (
-                "c".to_string(),
-                DepNode {
-                    name: "c".to_string(),
-                    version: "1.0.0".to_string(),
-                    edition: "2021".to_string(),
-                    direct_deps: vec![],
-                    has_build_script: false,
-                    src_dir: std::path::PathBuf::from("/fake/c"),
-                },
-            ),
-        ]
-        .into_iter()
-        .collect();
+            ("a".to_string(), DepNode { name: "a".to_string(), version: "1.0.0".to_string(), edition: "2021".to_string(), direct_deps: vec!["b".to_string(), "c".to_string()], has_build_script: false, src_dir: PathBuf::from("/fake/a") }),
+            ("b".to_string(), DepNode { name: "b".to_string(), version: "1.0.0".to_string(), edition: "2021".to_string(), direct_deps: vec![], has_build_script: false, src_dir: PathBuf::from("/fake/b") }),
+            ("c".to_string(), DepNode { name: "c".to_string(), version: "1.0.0".to_string(), edition: "2021".to_string(), direct_deps: vec![], has_build_script: false, src_dir: PathBuf::from("/fake/c") }),
+        ].into_iter().collect();
 
-        let levels = Compiler::topo_sort(&nodes);
-        assert_eq!(levels.len(), 2, "should be 2 levels");
-        assert!(
-            levels[0].contains(&"b".to_string()),
-            "b should be in level 0"
-        );
-        assert!(
-            levels[0].contains(&"c".to_string()),
-            "c should be in level 0"
-        );
-        assert_eq!(levels[1], vec!["a".to_string()], "a should be in level 1");
-    }
-
-    #[test]
-    fn test_compile_all_ordering() {
-        // Verify topo_sort + compile_all processes all nodes.
-        // Skip if rustc is absent.
-        if Compiler::rustc_version().is_err() {
-            return;
-        }
-
-        let api = crate::crates::CratesAPI::new();
-        // memchr has no compile-time deps, so it's trivially single-level
-        let nodes = Compiler::build_dep_tree(&api, "memchr", "2.7.4", &[]);
-        if nodes.is_err() {
-            return;
-        } // skip if network unavailable
-        let nodes = nodes.unwrap();
-
-        let levels = Compiler::topo_sort(&nodes);
-        assert!(!levels.is_empty(), "should have at least one level");
-        let total: usize = levels.iter().map(|l| l.len()).sum();
-        assert_eq!(total, nodes.len(), "topo sort should cover all nodes");
+        let levels = NativeBuilder::topo_sort(&nodes);
+        assert_eq!(levels.len(), 2);
+        assert!(levels[0].contains(&"b".to_string()));
+        assert!(levels[0].contains(&"c".to_string()));
+        assert_eq!(levels[1], vec!["a".to_string()]);
     }
 
     #[test]
     fn test_topo_sort_chain() {
         use std::collections::HashMap;
-        // a -> b -> c (chain)
         let nodes: HashMap<String, DepNode> = [
-            (
-                "a".to_string(),
-                DepNode {
-                    name: "a".to_string(),
-                    version: "1.0.0".to_string(),
-                    edition: "2021".to_string(),
-                    direct_deps: vec!["b".to_string()],
-                    has_build_script: false,
-                    src_dir: std::path::PathBuf::from("/fake/a"),
-                },
-            ),
-            (
-                "b".to_string(),
-                DepNode {
-                    name: "b".to_string(),
-                    version: "1.0.0".to_string(),
-                    edition: "2021".to_string(),
-                    direct_deps: vec!["c".to_string()],
-                    has_build_script: false,
-                    src_dir: std::path::PathBuf::from("/fake/b"),
-                },
-            ),
-            (
-                "c".to_string(),
-                DepNode {
-                    name: "c".to_string(),
-                    version: "1.0.0".to_string(),
-                    edition: "2021".to_string(),
-                    direct_deps: vec![],
-                    has_build_script: false,
-                    src_dir: std::path::PathBuf::from("/fake/c"),
-                },
-            ),
-        ]
-        .into_iter()
-        .collect();
+            ("a".to_string(), DepNode { name: "a".to_string(), version: "1.0.0".to_string(), edition: "2021".to_string(), direct_deps: vec!["b".to_string()], has_build_script: false, src_dir: PathBuf::from("/fake/a") }),
+            ("b".to_string(), DepNode { name: "b".to_string(), version: "1.0.0".to_string(), edition: "2021".to_string(), direct_deps: vec!["c".to_string()], has_build_script: false, src_dir: PathBuf::from("/fake/b") }),
+            ("c".to_string(), DepNode { name: "c".to_string(), version: "1.0.0".to_string(), edition: "2021".to_string(), direct_deps: vec![], has_build_script: false, src_dir: PathBuf::from("/fake/c") }),
+        ].into_iter().collect();
 
-        let levels = Compiler::topo_sort(&nodes);
+        let levels = NativeBuilder::topo_sort(&nodes);
         assert_eq!(levels.len(), 3);
         assert_eq!(levels[0], vec!["c".to_string()]);
         assert_eq!(levels[1], vec!["b".to_string()]);

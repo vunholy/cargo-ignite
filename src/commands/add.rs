@@ -3,7 +3,7 @@ use anyhow::Result;
 use crate::{
     cache::{Cache, CacheKey, FeatureSet},
     commands::Command,
-    compiler::Compiler,
+    compiler::NativeBuilder,
     crates::CratesAPI,
     manifest::Manifest,
     spinner::Spinner,
@@ -103,7 +103,7 @@ impl Add {
         // 3. Fetch all sources
         let sp = Spinner::new("fetching sources...");
         for (name, entry) in &resolved {
-            Compiler::download_source(name, &entry.vers, Some(&entry.cksum))?;
+            NativeBuilder::download_source(name, &entry.vers, Some(&entry.cksum))?;
         }
         sp.finish_with(format!(
             "\t  {G}{:<13}:{R} {Y}{} {} fetched{R}",
@@ -112,8 +112,8 @@ impl Add {
 
         // 4. Optional precompile (per crate)
         if self.precompile {
-            let rustc_ver = Compiler::rustc_version()?;
-            let target = Compiler::target_triple()?;
+            let rustc_ver = NativeBuilder::rustc_version()?;
+            let target = NativeBuilder::target_triple()?;
             let cache = Cache::new(self.verbose)?;
 
             for (name, entry) in &resolved {
@@ -144,8 +144,8 @@ impl Add {
 
                 let label = name.clone();
                 let sp = Spinner::new(format!("compiling {name}..."));
-                let compiler = Compiler::detect(self.verbose)?;
-                compiler.precompile_lib(
+                let builder = NativeBuilder::new(self.verbose)?;
+                builder.precompile_lib(
                     name,
                     &entry.vers,
                     &features_for_compile,

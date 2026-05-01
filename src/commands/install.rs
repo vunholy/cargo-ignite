@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::{
     cache::{Cache, CacheKey, FeatureSet},
     commands::Command,
-    compiler::Compiler,
+    compiler::NativeBuilder,
     crates::CratesAPI,
     spinner::Spinner,
 };
@@ -72,7 +72,7 @@ impl Install {
         sp.finish_with(format!("\t  {G}version      :{R} {Y}{}{R}", entry.vers));
 
         // 2. Verify this is a binary crate (download source — fast if already cached)
-        let src_dir = Compiler::download_source(&self.name, &entry.vers, Some(&entry.cksum))?;
+        let src_dir = NativeBuilder::download_source(&self.name, &entry.vers, Some(&entry.cksum))?;
         let manifest_path = src_dir.join("Cargo.toml");
         let manifest = Manifest::from_path(&manifest_path)?;
 
@@ -93,8 +93,8 @@ impl Install {
         }
 
         // 3. Fingerprint + cache lookup
-        let rustc_ver = Compiler::rustc_version()?;
-        let target = Compiler::target_triple()?;
+        let rustc_ver = NativeBuilder::rustc_version()?;
+        let target = NativeBuilder::target_triple()?;
         let feature_set = if self.features.is_empty() {
             FeatureSet::All
         } else {
@@ -146,8 +146,8 @@ impl Install {
         };
 
         let sp = Spinner::new("compiling...");
-        let compiler = Compiler::detect(self.verbose)?;
-        let bin_path = compiler.install_bin(
+        let builder = NativeBuilder::new(self.verbose)?;
+        let bin_path = builder.install_bin(
             &self.name,
             &entry.vers,
             Some(&entry.cksum),
