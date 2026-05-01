@@ -1,6 +1,6 @@
 [package]
 name = "cargo-ignite"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 description = "A high-performance alternative to `cargo add` for adding, removing, fetching, and installing dependencies, delivering up to **45× faster** performance than Cargo’s default tooling."
 license = "Apache-2.0"
